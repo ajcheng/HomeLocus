@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'app/app_state.dart';
 import 'app/theme.dart';
+import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 
 void main() {
@@ -23,7 +24,11 @@ class HomeLocusApp extends StatelessWidget {
       title: 'HomeLocus',
       theme: HomelocusTheme.light,
       darkTheme: HomelocusTheme.dark,
-      home: const HomeScreen(),
+      initialRoute: '/login',
+      routes: {
+        '/login': (_) => const LoginScreen(),
+        '/home': (_) => const HomeScreen(),
+      },
       debugShowCheckedModeBanner: false,
     );
   }

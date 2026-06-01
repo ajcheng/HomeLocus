@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
 
+    # Auth
+    jwt_secret: str = "homelocus-dev-secret-change-in-production"
+
     # Storage
     storage_backend: str = "minio"
     upload_dir: str = "./uploads"
