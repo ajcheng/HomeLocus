@@ -1,0 +1,24 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    id "dev.flutter.flutter-gradle-plugin"
+}
+android {
+    namespace "com.homelocus.homelocus"
+    compileSdk 35
+    defaultConfig {
+        applicationId "com.homelocus.homelocus"
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName "0.1.0"
+    }
+    buildTypes {
+        release {
+            signingConfig signingConfigs.debug
+        }
+    }
+}
+flutter {
+    source '../..'
+}
