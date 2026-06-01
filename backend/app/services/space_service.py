@@ -73,8 +73,11 @@ class SpaceService:
             self.db.add(slot)
 
         await self.db.commit()
-        await self.db.refresh(container)
-        return container
+
+        # Reload with slots eagerly to avoid async lazy-load issues
+        stmt = select(Container).where(Container.id == container.id).options(selectinload(Container.slots))
+        result = await self.db.execute(stmt)
+        return result.scalar_one()
 
     async def get_container(self, container_id: str) -> Container | None:
         stmt = select(Container).where(Container.id == container_id).options(selectinload(Container.slots))
