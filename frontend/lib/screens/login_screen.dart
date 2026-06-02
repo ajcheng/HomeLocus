@@ -28,7 +28,8 @@ class _LoginScreenState extends State<LoginScreen> {
         Navigator.pushReplacementNamed(context, '/home', arguments: {'token': token, 'user': user});
       }
     } catch (e) {
-      setState(() { _error = '登录失败: 用户名或密码错误'; });
+      setState(() { _error = '${e.toString().split("\n").first}'; });
+      if (_error!.length > 80) _error = _error!.substring(0, 80);
     }
     setState(() => _loading = false);
   }

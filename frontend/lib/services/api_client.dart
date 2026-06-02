@@ -9,7 +9,9 @@ class ApiClient {
   final http.Client _client = http.Client();
 
   Future<dynamic> get(String path) async {
-    final response = await _client.get(Uri.parse('$baseUrl$path'));
+    final response = await _client.get(
+      Uri.parse('$baseUrl$path'),
+    ).timeout(const Duration(seconds: 10));
     return _handleResponse(response);
   }
 
@@ -18,7 +20,7 @@ class ApiClient {
       Uri.parse('$baseUrl$path'),
       headers: {'Content-Type': 'application/json'},
       body: body != null ? jsonEncode(body) : null,
-    );
+    ).timeout(const Duration(seconds: 10));
     return _handleResponse(response);
   }
 
