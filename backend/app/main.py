@@ -9,7 +9,14 @@ from fastapi.responses import FileResponse
 from app.api.v1.router import router as v1_router
 from app.core.security_middleware import RateLimitMiddleware
 
-WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frontend", "build", "web")
+# Look for web app: check multiple possible locations
+_basedir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+_candidates = [
+    os.path.join(_basedir, "static"),                          # Docker: /static
+    os.path.join(_basedir, "app", "static"),                   # Docker alt
+    os.path.join(_basedir, "..", "frontend", "build", "web"), # Local dev
+]
+WEB_DIR = next((d for d in _candidates if os.path.isdir(d)), _candidates[-1])
 
 
 @asynccontextmanager

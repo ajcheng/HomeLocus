@@ -1,5 +1,5 @@
 # Production deployment — all services internal except backend
-# Access via nginx reverse proxy: home.ajcheng.com → backend:8000
+# Access via nginx reverse proxy: your-domain.com → backend:8000
 services:
   postgres:
     image: postgres:16-alpine
@@ -41,7 +41,7 @@ services:
     restart: unless-stopped
 
   backend:
-    build: ../backend
+    image: homelocus-backend:latest
     ports:
       - "127.0.0.1:8000:8000"   # Only localhost, nginx proxies
     environment:
@@ -68,9 +68,7 @@ services:
     restart: unless-stopped
 
   celery-worker:
-    build:
-      context: ../backend
-      dockerfile: Dockerfile.celery
+    image: homelocus-backend:latest
     command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
     environment:
       DATABASE_URL: "postgresql+asyncpg://homelocus:homelocus@postgres:5432/homelocus"
@@ -95,9 +93,7 @@ services:
     restart: unless-stopped
 
   celery-beat:
-    build:
-      context: ../backend
-      dockerfile: Dockerfile.celery
+    image: homelocus-backend:latest
     command: celery -A app.tasks.celery_app beat --loglevel=info
     environment:
       DATABASE_URL: "postgresql+asyncpg://homelocus:homelocus@postgres:5432/homelocus"

@@ -14,6 +14,9 @@ RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r req
 # App code
 COPY . .
 
+# Copy static web app to a known location
+COPY static /static
+
 # Create upload dir
 RUN mkdir -p /data/uploads
 
