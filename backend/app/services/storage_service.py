@@ -42,8 +42,9 @@ class StorageService:
 
     def get_presigned_url(self, object_name: str, expires: int = 3600) -> str:
         """Generate a presigned GET URL (default 1 hour expiry)."""
+        from datetime import timedelta
         try:
-            return self.client.presigned_get_object(self.bucket, object_name, expires=expires)
+            return self.client.presigned_get_object(self.bucket, object_name, expires=timedelta(seconds=expires))
         except S3Error:
             return ""
 

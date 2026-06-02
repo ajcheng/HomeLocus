@@ -1,4 +1,6 @@
+import hashlib
 import logging
+import uuid
 from typing import Optional
 
 import meilisearch
@@ -10,6 +12,12 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 VECTOR_SIZE = 512  # placeholder; CLIP generates 512-dim vectors
+
+
+def _str_to_uuid(s: str) -> str:
+    """Convert a string ID to a valid UUID for Qdrant."""
+    h = hashlib.md5(s.encode()).hexdigest()
+    return str(uuid.UUID(h))
 
 
 class SearchEngine:
@@ -50,11 +58,11 @@ class SearchEngine:
 
     def search_text(self, query: str, location_id: str | None = None, limit: int = 20) -> list[dict]:
         """Full-text search with optional location filter."""
-        params: dict = {"limit": limit}
-        if location_id:
-            params["filter"] = f'location_id = "{location_id}"'
         try:
-            result = self.meili.index("items").search(query, params)
+            opt_params = {"limit": limit}
+            if location_id:
+                opt_params["filter"] = f'location_id = "{location_id}"'
+            result = self.meili.index("items").search(query, opt_params)
             return [
                 {"id": h["id"], "label": h.get("label", ""), "score": 1.0 - (i * 0.02)}
                 for i, h in enumerate(result.get("hits", []))
@@ -82,9 +90,10 @@ class SearchEngine:
     def index_vector(self, item_id: str, vector: list[float], payload: dict | None = None):
         """Upsert a vector embedding for an item."""
         try:
+            uid = _str_to_uuid(item_id)
             self.qdrant.upsert(
                 collection_name="items",
-                points=[PointStruct(id=item_id, vector=vector, payload=payload or {})],
+                points=[PointStruct(id=uid, vector=vector, payload=payload or {})],
             )
         except Exception as e:
             logger.error(f"Qdrant upsert failed for {item_id}: {e}")
@@ -107,7 +116,8 @@ class SearchEngine:
 
     def delete_vector_index(self, item_id: str):
         try:
-            self.qdrant.delete("items", points_selector=[item_id])
+            uid = _str_to_uuid(item_id)
+            self.qdrant.delete("items", points_selector=[uid])
         except Exception:
             pass
 
