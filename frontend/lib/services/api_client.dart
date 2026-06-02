@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 
 class ApiClient {
@@ -40,6 +41,13 @@ class ApiClient {
       Uri.parse('$_baseUrl$path'),
     ).timeout(const Duration(seconds: 10));
     return _handleResponse(response);
+  }
+
+  Future<http.StreamedResponse> uploadFile(String path, File imageFile, Map<String, String> fields) async {
+    final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl$path'));
+    request.files.add(await http.MultipartFile.fromPath('file', imageFile.path));
+    request.fields.addAll(fields);
+    return request.send();
   }
 
   dynamic _handleResponse(http.Response response) {

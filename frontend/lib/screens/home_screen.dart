@@ -4,6 +4,7 @@ import 'space_screen.dart';
 import 'search_screen.dart';
 import 'reminders_screen.dart';
 import 'voice_input_screen.dart';
+import 'photo_upload_screen.dart';
 import 'family_screen.dart';
 import 'settings_screen.dart';
 import 'user_management_screen.dart';
@@ -54,13 +55,58 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const VoiceInputScreen(locationId: '')),
-        ),
-        icon: const Icon(Icons.mic),
-        label: const Text('语音添加'),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          showModalBottomSheet(
+            context: context,
+            builder: (ctx) => SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                  _AddButton(
+                    icon: Icons.camera_alt,
+                    label: '拍照添加',
+                    color: Colors.blue,
+                    onTap: () { Navigator.pop(ctx); Navigator.push(context, MaterialPageRoute(builder: (_) => const PhotoUploadScreen())); },
+                  ),
+                  _AddButton(
+                    icon: Icons.mic,
+                    label: '语音添加',
+                    color: Colors.orange,
+                    onTap: () { Navigator.pop(ctx); Navigator.push(context, MaterialPageRoute(builder: (_) => const VoiceInputScreen(locationId: ''))); },
+                  ),
+                ]),
+              ),
+            ),
+          );
+        },
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+
+class _AddButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _AddButton({required this.icon, required this.label, required this.color, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: 100,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          CircleAvatar(radius: 28, backgroundColor: color.withAlpha(40), child: Icon(icon, color: color, size: 28)),
+          const SizedBox(height: 8),
+          Text(label, style: const TextStyle(fontSize: 13)),
+        ]),
       ),
     );
   }
