@@ -47,6 +47,12 @@ async def create_container(data: schemas.ContainerCreate, svc: SpaceService = De
     return _build_container_response(container)
 
 
+@router.get("/containers", response_model=list[schemas.ContainerResponse])
+async def list_containers(zone_id: str | None = None, svc: SpaceService = Depends(get_space_service)):
+    containers = await svc.list_containers(zone_id)
+    return [_build_container_response(c) for c in containers]
+
+
 @router.get("/containers/{container_id}", response_model=schemas.ContainerResponse)
 async def get_container(container_id: str, svc: SpaceService = Depends(get_space_service)):
     container = await svc.get_container(container_id)

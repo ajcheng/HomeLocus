@@ -168,17 +168,8 @@ class _ZoneTileState extends State<_ZoneTile> {
   Future<void> _loadContainers() async {
     if (_containers != null) return;
     try {
-      // Load containers for this zone via zones endpoint (includes containers)
-      final data = await widget.api.get('/space/zones');
-      if (data is List) {
-        for (final z in data) {
-          if (z['id'] == widget.zone['id']) {
-            setState(() => _containers = []);
-            return;
-          }
-        }
-      }
-      setState(() => _containers = []);
+      final data = await widget.api.get('/space/containers?zone_id=${widget.zone['id']}');
+      setState(() { _containers = data is List ? data : []; });
     } catch (_) {
       setState(() => _containers = []);
     }
@@ -214,6 +205,32 @@ class _ZoneTileState extends State<_ZoneTile> {
     }
   }
 
+  Future<void> _addSlot(String containerId) async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('添加层级/抽屉'),
+        content: TextField(controller: ctrl, autofocus: true, decoration: const InputDecoration(hintText: '如：第二层抽屉')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('添加')),
+        ],
+      ),
+    );
+    if (ok == true && ctrl.text.isNotEmpty) {
+      try {
+        await widget.api.post('/space/containers/$containerId/slots', body: [
+          {'name': ctrl.text, 'level': 1},
+        ]);
+        setState(() => _containers = null);
+        _loadContainers();
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -225,6 +242,38 @@ class _ZoneTileState extends State<_ZoneTile> {
           onExpansionChanged: (exp) { if (exp) _loadContainers(); },
           trailing: IconButton(icon: const Icon(Icons.add, size: 18), onPressed: _addContainer),
           children: [
+            if (_containers != null) ...[
+              if (_containers!.isEmpty)
+                const Padding(padding: EdgeInsets.all(12), child: Text('暂无储物模块', style: TextStyle(color: Colors.grey, fontSize: 13)))
+              else
+                for (final c in _containers!)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                    child: Card(
+                      child: ExpansionTile(
+                        leading: const Icon(Icons.cabin, size: 18),
+                        title: Text(c['name'] ?? '', style: const TextStyle(fontSize: 14)),
+                        subtitle: Text('${(c['slots'] as List?)?.length ?? 0} 个层级', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                        children: [
+                          if (c['slots'] != null)
+                            for (final s in c['slots'] as List)
+                              ListTile(
+                                dense: true,
+                                leading: const Icon(Icons.grid_view, size: 16),
+                                title: Text(s['name'] ?? '', style: const TextStyle(fontSize: 13)),
+                                subtitle: Text('层级 ${s['level'] ?? 0}', style: const TextStyle(fontSize: 11)),
+                              ),
+                          ListTile(
+                            dense: true,
+                            leading: const Icon(Icons.add, color: Colors.green, size: 16),
+                            title: const Text('添加层级', style: TextStyle(fontSize: 13)),
+                            onTap: () => _addSlot(c['id']),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+            ],
             ListTile(
               leading: const Icon(Icons.add, color: Colors.green, size: 18),
               title: const Text('添加储物模块', style: TextStyle(fontSize: 14)),

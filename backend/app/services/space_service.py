@@ -79,6 +79,13 @@ class SpaceService:
         result = await self.db.execute(stmt)
         return result.scalar_one()
 
+    async def list_containers(self, zone_id: str | None = None) -> list[Container]:
+        stmt = select(Container).options(selectinload(Container.slots))
+        if zone_id:
+            stmt = stmt.where(Container.zone_id == zone_id)
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_container(self, container_id: str) -> Container | None:
         stmt = select(Container).where(Container.id == container_id).options(selectinload(Container.slots))
         result = await self.db.execute(stmt)

@@ -18,7 +18,7 @@ class ApiClient {
     return _handleResponse(response);
   }
 
-  Future<dynamic> post(String path, {Map<String, dynamic>? body}) async {
+  Future<dynamic> post(String path, {Object? body}) async {
     final response = await _client.post(
       Uri.parse('$_baseUrl$path'),
       headers: {'Content-Type': 'application/json'},
@@ -27,7 +27,7 @@ class ApiClient {
     return _handleResponse(response);
   }
 
-  Future<dynamic> put(String path, {Map<String, dynamic>? body}) async {
+  Future<dynamic> put(String path, {Object? body}) async {
     final response = await _client.put(
       Uri.parse('$_baseUrl$path'),
       headers: {'Content-Type': 'application/json'},
