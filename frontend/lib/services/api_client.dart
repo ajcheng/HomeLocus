@@ -2,11 +2,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiClient {
-  /// Default API base URL. Override per instance or change globally.
-  /// - Web (same-origin): "/api/v1"
-  /// - Android emulator: "http://10.0.2.2:8000/api/v1"
-  /// - Physical device: "https://your-server.com:8443/api/v1"
-  static String baseUrl = '/api/v1';
+  /// Default API base URL. Configurable in login screen settings.
+  static String baseUrl = 'https://home.ajcheng.com:8443/api/v1';
 
   final String _baseUrl;
   final http.Client _client = http.Client();
