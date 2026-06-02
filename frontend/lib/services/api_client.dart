@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiClient {
-  static String baseUrl = 'http://localhost:8000/api/v1';
+  // Android emulator: 10.0.2.2 maps to host's localhost
+  // Change to your server IP for physical devices
+  static String baseUrl = 'http://10.0.2.2:8000/api/v1';
 
   final http.Client _client = http.Client();
 
