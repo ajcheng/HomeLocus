@@ -13,7 +13,6 @@ class _SpaceScreenState extends State<SpaceScreen> {
   List<dynamic> _locations = [];
   bool _loading = true;
   String? _error;
-  Map<String, List<dynamic>> _zonesCache = {};
 
   @override
   void initState() {
@@ -32,69 +31,22 @@ class _SpaceScreenState extends State<SpaceScreen> {
     setState(() => _loading = false);
   }
 
-  Future<void> _loadZones(String locId) async {
-    if (_zonesCache.containsKey(locId)) return;
-    try {
-      final data = await _api.get('/space/zones?location_id=$locId');
-      setState(() { _zonesCache[locId] = data is List ? data : []; });
-    } catch (_) {}
-  }
-
-  Future<void> _addDialog(String type, String parentId, String parentLabel) async {
+  Future<void> _addLocation() async {
     final ctrl = TextEditingController();
-    final labels = {'zone': '分区', 'container': '储物模块', 'slot': '层级'};
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('添加${labels[type]}'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text('添加到: $parentLabel', style: const TextStyle(color: Colors.grey, fontSize: 13)),
-          const SizedBox(height: 8),
-          TextField(controller: ctrl, autofocus: true, decoration: InputDecoration(hintText: '${labels[type]}名称')),
-        ]),
+        title: const Text('创建地点'),
+        content: TextField(controller: ctrl, autofocus: true, decoration: const InputDecoration(hintText: '地点名称')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('创建')),
         ],
       ),
     );
-    if (ok != true || ctrl.text.isEmpty) return;
-
-    try {
-      final path = type == 'zone'
-          ? '/space/zones'
-          : type == 'slot'
-              ? '/space/containers/$parentId/slots'
-              : '/space/containers';
-      final body = type == 'zone'
-          ? {'location_id': parentId, 'name': ctrl.text}
-          : type == 'slot'
-              ? [{'name': ctrl.text, 'level': 1}]
-              : {'zone_id': parentId, 'name': ctrl.text, 'slots': <Map>[]};
-      body is List ? await _api.post(path) : await _api.post(path, body: body as Map<String, dynamic>);
-      _zonesCache.remove(parentId.startsWith('zone') ? parentId.split('_').first : parentId);
-      _load();
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
-    }
-  }
-
-  Future<void> _deleteSlot(String slotId, String name) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('删除层级'),
-        content: Text('确定删除「$name」？此操作不可撤销。'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          FilledButton(style: FilledButton.styleFrom(backgroundColor: Colors.red), onPressed: () => Navigator.pop(ctx, true), child: const Text('删除')),
-        ],
-      ),
-    );
-    if (ok == true) {
+    if (ok == true && ctrl.text.isNotEmpty) {
       try {
-        await _api.delete('/space/slots/$slotId');
-        _zonesCache.clear();
+        await _api.post('/space/locations', body: {'name': ctrl.text, 'is_default': _locations.isEmpty});
         _load();
       } catch (e) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
@@ -108,78 +60,77 @@ class _SpaceScreenState extends State<SpaceScreen> {
       appBar: AppBar(title: const Text('空间管理'), actions: [
         IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
       ]),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final ctrl = TextEditingController();
-          final ok = await showDialog<bool>(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              title: const Text('创建地点'),
-              content: TextField(controller: ctrl, autofocus: true, decoration: const InputDecoration(hintText: '地点名称')),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-                FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('创建')),
-              ],
-            ),
-          );
-          if (ok == true && ctrl.text.isNotEmpty) {
-            try {
-              await _api.post('/space/locations', body: {'name': ctrl.text, 'is_default': _locations.isEmpty});
-              _load();
-            } catch (e) {
-              if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
-            }
-          }
-        },
-        child: const Icon(Icons.add_location_alt),
-      ),
+      floatingActionButton: FloatingActionButton(onPressed: _addLocation, child: const Icon(Icons.add_location_alt)),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
               ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
                   const Icon(Icons.error_outline, size: 48, color: Colors.red),
-                  const SizedBox(height: 8),
-                  Text('加载失败: $_error'),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 8), Text(_error!),
                   FilledButton.tonal(onPressed: _load, child: const Text('重试')),
                 ]))
               : _locations.isEmpty
-                  ? const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.home_outlined, size: 64, color: Colors.grey),
-                      SizedBox(height: 12),
-                      Text('还没有地点，点击 + 创建'),
-                    ]))
+                  ? const Center(child: Text('还没有地点，点击 + 创建'))
                   : RefreshIndicator(
                       onRefresh: _load,
                       child: ListView.builder(
                         padding: const EdgeInsets.only(bottom: 80),
                         itemCount: _locations.length,
-                        itemBuilder: (_, i) {
-                          final loc = _locations[i];
-                          return _LocationCard(
-                            loc: loc,
-                            api: _api,
-                            zonesCache: _zonesCache,
-                            onLoadZones: () => _loadZones(loc['id']),
-                            onAdd: _addDialog,
-                            onDeleteSlot: _deleteSlot,
-                          );
-                        },
+                        itemBuilder: (_, i) => _LocationTile(loc: _locations[i], api: _api, onRefresh: _load),
                       ),
                     ),
     );
   }
 }
 
-class _LocationCard extends StatelessWidget {
+// ---- Location Tile ----
+class _LocationTile extends StatefulWidget {
   final dynamic loc;
   final ApiClient api;
-  final Map<String, List<dynamic>> zonesCache;
-  final VoidCallback onLoadZones;
-  final Future<void> Function(String, String, String) onAdd;
-  final Future<void> Function(String, String) onDeleteSlot;
+  final VoidCallback onRefresh;
+  const _LocationTile({required this.loc, required this.api, required this.onRefresh});
 
-  const _LocationCard({required this.loc, required this.api, required this.zonesCache, required this.onLoadZones, required this.onAdd, required this.onDeleteSlot});
+  @override
+  State<_LocationTile> createState() => _LocationTileState();
+}
+
+class _LocationTileState extends State<_LocationTile> {
+  List<dynamic>? _zones;
+
+  Future<void> _loadZones() async {
+    if (_zones != null) return;
+    try {
+      final data = await widget.api.get('/space/zones?location_id=${widget.loc['id']}');
+      setState(() { _zones = data is List ? data : []; });
+    } catch (_) {
+      setState(() => _zones = []);
+    }
+  }
+
+  Future<void> _addZone() async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('添加分区'),
+        content: TextField(controller: ctrl, autofocus: true, decoration: const InputDecoration(hintText: '如：客厅、主卧')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('添加')),
+        ],
+      ),
+    );
+    if (ok == true && ctrl.text.isNotEmpty) {
+      try {
+        await widget.api.post('/space/zones', body: {'location_id': widget.loc['id'], 'name': ctrl.text});
+        setState(() => _zones = null);
+        _loadZones();
+        widget.onRefresh();
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -187,52 +138,97 @@ class _LocationCard extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: ExpansionTile(
         leading: const Icon(Icons.location_city, color: Colors.blue),
-        title: Text(loc['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text('${loc['zone_count'] ?? 0} 个分区'),
-        onExpansionChanged: (expanded) { if (expanded) onLoadZones(); },
+        title: Text(widget.loc['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text('${widget.loc['zone_count'] ?? 0} 个分区'),
+        onExpansionChanged: (exp) { if (exp) _loadZones(); },
         children: [
-          if (zonesCache.containsKey(loc['id']))
-            for (final zone in zonesCache[loc['id']]!)
-              _ZoneCard(zone: zone, api: api, onAdd: onAdd, onDeleteSlot: onDeleteSlot),
-          ListTile(
-            leading: const Icon(Icons.add, color: Colors.green),
-            title: const Text('添加分区'),
-            onTap: () => onAdd('zone', loc['id'], loc['name'] ?? ''),
-          ),
-          const SizedBox(height: 8),
+          if (_zones != null)
+            for (final z in _zones!)
+              _ZoneTile(zone: z, api: widget.api),
+          ListTile(leading: const Icon(Icons.add, color: Colors.green), title: const Text('添加分区'), onTap: _addZone),
         ],
       ),
     );
   }
 }
 
-class _ZoneCard extends StatelessWidget {
+// ---- Zone Tile ----
+class _ZoneTile extends StatefulWidget {
   final dynamic zone;
   final ApiClient api;
-  final Future<void> Function(String, String, String) onAdd;
-  final Future<void> Function(String, String) onDeleteSlot;
+  const _ZoneTile({required this.zone, required this.api});
 
-  const _ZoneCard({required this.zone, required this.api, required this.onAdd, required this.onDeleteSlot});
+  @override
+  State<_ZoneTile> createState() => _ZoneTileState();
+}
+
+class _ZoneTileState extends State<_ZoneTile> {
+  List<dynamic>? _containers;
+
+  Future<void> _loadContainers() async {
+    if (_containers != null) return;
+    try {
+      // Load containers for this zone via zones endpoint (includes containers)
+      final data = await widget.api.get('/space/zones');
+      if (data is List) {
+        for (final z in data) {
+          if (z['id'] == widget.zone['id']) {
+            setState(() => _containers = []);
+            return;
+          }
+        }
+      }
+      setState(() => _containers = []);
+    } catch (_) {
+      setState(() => _containers = []);
+    }
+  }
+
+  Future<void> _addContainer() async {
+    final ctrl = TextEditingController();
+    final slotCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('在「${widget.zone['name']}」添加储物模块'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: ctrl, autofocus: true, decoration: const InputDecoration(labelText: '储物模块', hintText: '如：大衣柜')),
+          const SizedBox(height: 8),
+          TextField(controller: slotCtrl, decoration: const InputDecoration(labelText: '第一个层级', hintText: '如：第一层抽屉')),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('创建')),
+        ],
+      ),
+    );
+    if (ok == true && ctrl.text.isNotEmpty) {
+      try {
+        final slots = slotCtrl.text.isNotEmpty ? [{'name': slotCtrl.text, 'level': 1}] : <Map<String, dynamic>>[];
+        await widget.api.post('/space/containers', body: {'zone_id': widget.zone['id'], 'name': ctrl.text, 'slots': slots});
+        setState(() => _containers = null);
+        _loadContainers();
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Card(
         child: ExpansionTile(
           leading: const Icon(Icons.crop_square, size: 20),
-          title: Text(zone['name'] ?? ''),
-          trailing: IconButton(
-            icon: const Icon(Icons.add, size: 18),
-            onPressed: () => onAdd('container', zone['id'], zone['name'] ?? ''),
-          ),
+          title: Text(widget.zone['name'] ?? ''),
+          onExpansionChanged: (exp) { if (exp) _loadContainers(); },
+          trailing: IconButton(icon: const Icon(Icons.add, size: 18), onPressed: _addContainer),
           children: [
-            // Containers and slots would need another API to load
-            // For now show a placeholder
             ListTile(
               leading: const Icon(Icons.add, color: Colors.green, size: 18),
               title: const Text('添加储物模块', style: TextStyle(fontSize: 14)),
-              onTap: () => onAdd('container', zone['id'], zone['name'] ?? ''),
+              onTap: _addContainer,
             ),
             const SizedBox(height: 4),
           ],

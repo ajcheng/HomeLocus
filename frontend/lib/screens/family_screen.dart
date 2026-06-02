@@ -114,9 +114,9 @@ class _FamilyScreenState extends State<FamilyScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('家庭管理'), actions: [
-        IconButton(icon: const Icon(Icons.group_add), onPressed: _joinFamily),
+        IconButton(icon: const Icon(Icons.group_add), tooltip: '加入家庭', onPressed: _joinFamily),
+        IconButton(icon: const Icon(Icons.add), tooltip: '创建家庭', onPressed: _createFamily),
       ]),
-      floatingActionButton: FloatingActionButton(onPressed: _createFamily, child: const Icon(Icons.add)),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _families.isEmpty

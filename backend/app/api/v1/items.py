@@ -20,7 +20,7 @@ def get_item_service(db: AsyncSession = Depends(get_db)) -> ItemService:
 
 def _save_temp(slot_id: str, file: UploadFile) -> str:
     """Save uploaded file to temp storage, return absolute path."""
-    upload_dir = os.path.join(settings.upload_dir, slot_id)
+    upload_dir = os.path.join(settings.storage_local_path, slot_id)
     os.makedirs(upload_dir, exist_ok=True)
     ext = os.path.splitext(file.filename or "image.jpg")[1] or ".jpg"
     filename = f"{uuid.uuid4().hex}{ext}"

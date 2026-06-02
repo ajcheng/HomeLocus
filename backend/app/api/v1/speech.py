@@ -55,6 +55,23 @@ async def speech_add_item(
         os.unlink(tmp_path)
 
 
+@router.post("/add-item-text", response_model=schemas.SpeechAddItemResponse)
+async def speech_add_item_text(
+    text: str = Form(...),
+    location_id: str = Form(""),
+    svc: SpeechService = Depends(get_speech_service),
+):
+    """Parse natural language text (no audio file needed)."""
+    parsed = await svc.parse_item_from_text(text)
+    matched = await svc.try_match_slot(parsed, location_id if location_id else None)
+    return schemas.SpeechAddItemResponse(
+        transcription=text,
+        parsed_item=parsed,
+        matched_slot=matched,
+        needs_confirmation=True,
+    )
+
+
 @router.post("/add-item/confirm")
 async def confirm_speech_item(
     data: schemas.ConfirmedSpeechItem,
