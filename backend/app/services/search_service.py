@@ -1,72 +1,81 @@
 from typing import Optional
 
-from app.core.config import settings
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.models.space import Slot, Container, Zone, Location
+from app.models.item import Item
+from app.services.search_engine import search_engine
 
 
 class SearchService:
-    """
-    Hybrid search service combining:
-    - Meilisearch (text search + fuzzy matching)
-    - Qdrant (vector similarity search)
-    - RRF (Reciprocal Rank Fusion) for result merging
-    """
+    """Hybrid search with breadcrumb (location chain) enrichment."""
 
-    def __init__(self):
-        self.qdrant_url = settings.qdrant_url
-        self.meili_url = settings.meilisearch_url
-        self.meili_key = settings.meilisearch_api_key
+    def __init__(self, db: AsyncSession):
+        self.db = db
 
-    async def hybrid_search(
+    async def search(
         self,
         text: Optional[str] = None,
-        image_vector: Optional[list[float]] = None,
+        vector: Optional[list[float]] = None,
         location_id: Optional[str] = None,
         limit: int = 20,
     ) -> list[dict]:
-        text_results = await self._text_search(text, location_id, limit) if text else []
-        vector_results = await self._vector_search(image_vector, location_id, limit) if image_vector else []
+        # Raw search from engines
+        hits = search_engine.hybrid_search(text=text, vector=vector, location_id=location_id, limit=limit)
 
-        return self._rrf_fusion(text_results, vector_results, limit)
+        # Enrich with breadcrumbs from DB
+        if not hits:
+            return []
 
-    async def _text_search(self, text: str, location_id: Optional[str], limit: int) -> list[dict]:
-        # TODO: Meilisearch client integration
-        return []
+        item_ids = [h["id"] for h in hits if h.get("id")]
+        if item_ids:
+            enriched = await self._enrich_breadcrumbs(item_ids)
+            # Merge enriched data into hits
+            for hit in hits:
+                extra = enriched.get(hit["id"], {})
+                hit.update(extra)
 
-    async def _vector_search(self, vector: list[float], location_id: Optional[str], limit: int) -> list[dict]:
-        # TODO: Qdrant client integration
-        return []
+        return hits
 
-    def _rrf_fusion(self, text_results: list[dict], vector_results: list[dict], k: int) -> list[dict]:
-        """Reciprocal Rank Fusion — merge and re-rank results."""
-        scores: dict[str, dict] = {}
-        rrf_k = 60
+    async def _enrich_breadcrumbs(self, item_ids: list[str]) -> dict[str, dict]:
+        """Look up full location chain for each item."""
+        stmt = (
+            select(Item, Slot, Container, Zone, Location)
+            .join(Slot, Item.slot_id == Slot.id)
+            .join(Container, Slot.container_id == Container.id)
+            .join(Zone, Container.zone_id == Zone.id)
+            .join(Location, Zone.location_id == Location.id)
+            .where(Item.id.in_(item_ids))
+        )
+        result = await self.db.execute(stmt)
+        rows = result.all()
 
-        for rank, item in enumerate(text_results):
-            key = item.get("id")
-            if key not in scores:
-                scores[key] = item
-            scores[key]["rrf_score"] = scores[key].get("rrf_score", 0) + 1 / (rrf_k + rank + 1)
+        enriched = {}
+        for item, slot, container, zone, location in rows:
+            enriched[item.id] = {
+                "slot_id": slot.id,
+                "slot_name": slot.name,
+                "container_name": container.name,
+                "zone_name": zone.name,
+                "location_name": location.name,
+                "breadcrumb": f"{location.name} / {zone.name} / {container.name} / {slot.name}",
+                "thumbnail_url": item.thumbnail_path or "",
+                "last_updated": item.updated_at.isoformat() if item.updated_at else None,
+                "label": item.label,
+            }
+        return enriched
 
-        for rank, item in enumerate(vector_results):
-            key = item.get("id")
-            if key not in scores:
-                scores[key] = item
-            scores[key]["rrf_score"] = scores[key].get("rrf_score", 0) + 1 / (rrf_k + rank + 1)
+    def index_item(
+        self, item_id: str, label: str, brand: str | None,
+        tags: list[str], ocr_text: str, location_id: str, vector: list[float] | None = None
+    ):
+        """Index item in both engines."""
+        search_engine.index_text(item_id, label, brand, tags, ocr_text, location_id)
+        if vector:
+            search_engine.index_vector(item_id, vector, {"label": label, "location_id": location_id})
 
-        merged = sorted(scores.values(), key=lambda x: x.get("rrf_score", 0), reverse=True)
-        return merged[:k]
-
-    async def index_item(self, item_id: str, label: str, tags: list[str], vector: list[float], location_id: str) -> None:
-        """Index an item in both Meilisearch and Qdrant."""
-        # TODO: Index in Meilisearch
-        # TODO: Upsert in Qdrant
-        pass
-
-    async def delete_item_index(self, item_id: str) -> None:
-        """Remove item from search indices."""
-        # TODO: Delete from Meilisearch
-        # TODO: Delete from Qdrant
-        pass
-
-
-search_service = SearchService()
+    def delete_item_index(self, item_id: str):
+        search_engine.delete_text_index(item_id)
+        search_engine.delete_vector_index(item_id)

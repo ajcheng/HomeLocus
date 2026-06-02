@@ -8,6 +8,8 @@ from app.core.database import get_db
 from app.core.config import settings
 from app.schemas import item as schemas
 from app.services.item_service import ItemService
+from app.services.storage_service import storage_service
+from app.tasks.recognition import process_upload
 
 router = APIRouter()
 
@@ -16,15 +18,16 @@ def get_item_service(db: AsyncSession = Depends(get_db)) -> ItemService:
     return ItemService(db)
 
 
-def _save_upload(slot_id: str, file: UploadFile) -> str:
-    """Save uploaded file to local storage, return relative path."""
+def _save_temp(slot_id: str, file: UploadFile) -> str:
+    """Save uploaded file to temp storage, return absolute path."""
     upload_dir = os.path.join(settings.upload_dir, slot_id)
     os.makedirs(upload_dir, exist_ok=True)
     ext = os.path.splitext(file.filename or "image.jpg")[1] or ".jpg"
     filename = f"{uuid.uuid4().hex}{ext}"
     filepath = os.path.join(upload_dir, filename)
+    content = file.file.read()
     with open(filepath, "wb") as f:
-        f.write(file.file.read())
+        f.write(content)
     return filepath
 
 
@@ -34,21 +37,42 @@ async def upload_image(
     file: UploadFile = File(...),
     svc: ItemService = Depends(get_item_service),
 ):
-    filepath = _save_upload(slot_id, file)
-    task_id = f"celery_{uuid.uuid4().hex[:12]}"
+    filepath = _save_temp(slot_id, file)
+    task_id = f"task_{uuid.uuid4().hex[:12]}"
 
+    # Create snapshot record in DB
     snapshot = await svc.create_snapshot(slot_id, filepath, task_id)
 
-    # TODO: Dispatch Celery task for AI recognition
-    # recognize_items.delay(task_id, filepath, slot_id)
+    # Dispatch async AI recognition pipeline via Celery
+    process_upload.delay(task_id, filepath, slot_id)
 
     return schemas.UploadResponse(task_id=task_id, status="processing", slot_id=slot_id)
 
 
 @router.get("/task-status/{task_id}", response_model=schemas.TaskStatusResponse)
 async def get_task_status(task_id: str, svc: ItemService = Depends(get_item_service)):
-    # TODO: Query Celery task result from Redis/DB
-    return schemas.TaskStatusResponse(task_id=task_id, status="processing", items=[])
+    from celery.result import AsyncResult
+    from app.tasks.celery_app import celery_app
+
+    result = AsyncResult(task_id, app=celery_app)
+
+    if result.ready():
+        if result.successful():
+            data = result.result or {}
+            items = data.get("items", [])
+            return schemas.TaskStatusResponse(
+                task_id=task_id,
+                status="completed",
+                items=items,
+            )
+        else:
+            return schemas.TaskStatusResponse(
+                task_id=task_id,
+                status="failed",
+                error=str(result.info) if result.info else "Unknown error",
+            )
+    else:
+        return schemas.TaskStatusResponse(task_id=task_id, status="processing")
 
 
 @router.put("/confirm/{item_id}", response_model=schemas.ItemResponse)
