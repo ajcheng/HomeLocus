@@ -1,10 +1,17 @@
-from fastapi import APIRouter, Depends
+import os
+import uuid
+import tempfile
+
+from fastapi import APIRouter, Depends, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.security import get_current_user
+from app.models.user import User
 from app.schemas import search as schemas
 from app.services.search_service import SearchService
 from app.services.semantic_search import semantic_search
+from app.services.ai_recognition import ai_recognition
 
 router = APIRouter()
 
@@ -13,25 +20,8 @@ def get_search_service(db: AsyncSession = Depends(get_db)) -> SearchService:
     return SearchService(db)
 
 
-@router.post("/hybrid", response_model=schemas.HybridSearchResponse)
-async def hybrid_search(
-    data: schemas.HybridSearchRequest,
-    svc: SearchService = Depends(get_search_service),
-):
-    # Semantic query expansion for fuzzy search
-    search_terms = data.text
-    if data.text and len(data.text) >= 2:
-        expanded = await semantic_search.expand_query(data.text)
-        # Combine expanded terms for Meilisearch multi-word search
-        search_terms = " ".join(expanded)
-
-    results = await svc.search(
-        text=search_terms,
-        location_id=data.location_id,
-        limit=data.limit,
-    )
-
-    items = [
+def _result_items(results: list[dict]) -> list[schemas.SearchResultItem]:
+    return [
         schemas.SearchResultItem(
             thumbnail_url=r.get("thumbnail_url"),
             item_label=r.get("label", r.get("item_label", "")),
@@ -43,35 +33,56 @@ async def hybrid_search(
         for r in results
     ]
 
-    return schemas.HybridSearchResponse(results=items, total=len(items))
+
+@router.post("/hybrid", response_model=schemas.HybridSearchResponse)
+async def hybrid_search(
+    data: schemas.HybridSearchRequest,
+    svc: SearchService = Depends(get_search_service),
+):
+    search_terms = data.text
+    if data.text and len(data.text) >= 2:
+        expanded = await semantic_search.expand_query(data.text)
+        search_terms = " ".join(expanded)
+
+    results = await svc.search(text=search_terms, location_id=data.location_id, limit=data.limit)
+    return schemas.HybridSearchResponse(results=_result_items(results), total=len(results))
 
 
 @router.post("/by-image", response_model=schemas.HybridSearchResponse)
 async def search_by_image(
-    data: schemas.HybridSearchRequest,
+    file: UploadFile = File(...),
+    location_id: str | None = Form(None),
+    limit: int = Form(default=20),
+    user: User = Depends(get_current_user),
     svc: SearchService = Depends(get_search_service),
 ):
     """
-    Image search: generate CLIP vector from image and search Qdrant.
-    Falls back to empty results when AI is not configured.
+    Upload an image → AI recognition extracts labels → text search finds similar items.
     """
-    # TODO: Generate CLIP embedding from image_file
-    results = await svc.search(
-        vector=None,  # CLIP embedding placeholder
-        location_id=data.location_id,
-        limit=data.limit,
-    )
+    # Save temp file
+    suffix = os.path.splitext(file.filename or "search.jpg")[1] or ".jpg"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
 
-    items = [
-        schemas.SearchResultItem(
-            thumbnail_url=r.get("thumbnail_url"),
-            item_label=r.get("label", ""),
-            breadcrumb=r.get("breadcrumb", ""),
-            slot_id=r.get("slot_id", ""),
-            last_updated=r.get("last_updated"),
-            score=r.get("score", 0.0),
-        )
-        for r in results
-    ]
+    try:
+        # Analyze image with AI
+        vision_result = await ai_recognition.analyze_image(tmp_path)
 
-    return schemas.HybridSearchResponse(results=items, total=len(items))
+        # Extract labels and use first few as search terms
+        items_detected = vision_result.get("items", [])
+        if items_detected:
+            labels = [item.get("label", "") for item in items_detected if item.get("label")]
+            search_text = " ".join(labels[:5])  # Use up to 5 detected labels
+        else:
+            # Fallback: use the summary as search text
+            search_text = vision_result.get("summary", "")
+
+        if not search_text:
+            return schemas.HybridSearchResponse(results=[], total=0)
+
+        results = await svc.search(text=search_text, location_id=location_id, limit=limit)
+        return schemas.HybridSearchResponse(results=_result_items(results), total=len(results))
+
+    finally:
+        os.unlink(tmp_path)

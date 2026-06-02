@@ -6,6 +6,7 @@ import 'reminders_screen.dart';
 import 'voice_input_screen.dart';
 import 'family_screen.dart';
 import 'settings_screen.dart';
+import 'user_management_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -41,6 +42,11 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('HomeLocus'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.people),
+            tooltip: '用户管理',
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const UserManagementScreen())),
+          ),
           IconButton(
             icon: const Icon(Icons.settings),
             tooltip: '设置',

@@ -4,12 +4,17 @@ from pydantic import BaseModel, Field, EmailStr
 class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=2, max_length=50)
     email: str = Field(..., max_length=200)
-    password: str = Field(..., min_length=6, max_length=100)
+    password: str = Field(..., min_length=1, max_length=100)
 
 
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str = Field(..., min_length=1, max_length=100)
 
 
 class TokenResponse(BaseModel):
