@@ -4,6 +4,7 @@ import 'space_screen.dart';
 import 'search_screen.dart';
 import 'reminders_screen.dart';
 import 'voice_input_screen.dart';
+import 'family_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,6 +20,7 @@ class _HomeScreenState extends State<HomeScreen> {
     SpaceScreen(),
     SearchScreen(),
     RemindersScreen(),
+    FamilyScreen(),
   ];
 
   @override
@@ -32,6 +34,7 @@ class _HomeScreenState extends State<HomeScreen> {
           NavigationDestination(icon: Icon(Icons.home), label: '空间'),
           NavigationDestination(icon: Icon(Icons.search), label: '搜索'),
           NavigationDestination(icon: Icon(Icons.notifications), label: '提醒'),
+          NavigationDestination(icon: Icon(Icons.people), label: '家庭'),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
