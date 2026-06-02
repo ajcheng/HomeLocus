@@ -22,8 +22,8 @@ class SemanticSearchService:
     """Semantic query expansion using LLM for fuzzy item matching."""
 
     def __init__(self):
-        self.api_key = settings.deepseek_api_key
-        self.base_url = settings.deepseek_base_url.rstrip("/") + "/v1"
+        self.api_key = settings.ai_api_key
+        self.base_url = settings.ai_base_url.rstrip("/") + "/v1"
 
     async def expand_query(self, query: str) -> list[str]:
         """Expand a fuzzy query into specific search terms."""
@@ -39,7 +39,7 @@ class SemanticSearchService:
                         "Content-Type": "application/json",
                     },
                     json={
-                        "model": "deepseek-chat",
+                        "model": settings.ai_model,
                         "messages": [{"role": "user", "content": EXPANSION_PROMPT.format(query=query)}],
                         "max_tokens": 200,
                         "temperature": 0.3,

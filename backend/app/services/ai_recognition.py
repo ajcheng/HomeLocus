@@ -41,9 +41,9 @@ class AIRecognitionService:
     """AI-powered image recognition using DeepSeek-V4 Vision API."""
 
     def __init__(self):
-        self.api_key = settings.deepseek_api_key
-        self.base_url = settings.deepseek_base_url.rstrip("/") + "/v1"
-        self.model = "deepseek-chat"
+        self.api_key = settings.ai_api_key
+        self.base_url = settings.ai_base_url.rstrip("/") + "/v1"
+        self.model = settings.ai_model
 
     async def analyze_image(self, image_path: str) -> dict:
         """

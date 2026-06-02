@@ -55,8 +55,36 @@ services:
     volumes:
       - meili_data:/meili_data
 
+  # ---- Backend (comment out if running locally) ----
+  # backend:
+  #   build: ../backend
+  #   ports:
+  #     - "8000:8000"
+  #   environment:
+  #     DATABASE_URL: "postgresql+asyncpg://homelocus:homelocus@postgres:5432/homelocus"
+  #     REDIS_URL: "redis://redis:6379/0"
+  #     STORAGE_BACKEND: "local"
+  #     STORAGE_LOCAL_PATH: "/data/uploads"
+  #     QDRANT_URL: "http://qdrant:6333"
+  #     MEILISEARCH_URL: "http://meilisearch:7700"
+  #     AI_PROVIDER: "deepseek"
+  #     AI_API_KEY: ""
+  #   volumes:
+  #     - homelocus_uploads:/data/uploads
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+
 volumes:
   pgdata:
   minio_data:
   qdrant_data:
   meili_data:
+  homelocus_uploads:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/HomeLocus/uploads

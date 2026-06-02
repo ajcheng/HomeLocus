@@ -58,6 +58,16 @@ async def health_check():
     return {"status": "ok"}
 
 
+# Serve uploaded files (for local storage backend)
+@app.get("/api/v1/files/{rest:path}")
+async def serve_file(rest: str):
+    from app.core.config import settings
+    filepath = os.path.join(settings.storage_local_path, rest)
+    if os.path.isfile(filepath):
+        return FileResponse(filepath)
+    return {"detail": "File not found"}
+
+
 @app.get("/app/{rest:path}")
 async def spa_fallback(rest: str = ""):
     index = os.path.join(WEB_DIR, "index.html")
