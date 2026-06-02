@@ -1,13 +1,12 @@
+# Production deployment — all services internal except backend
+# Access via nginx reverse proxy: home.ajcheng.com → backend:8000
 services:
-  # ---- Database ----
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: homelocus
       POSTGRES_PASSWORD: homelocus
       POSTGRES_DB: homelocus
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -17,11 +16,8 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # ---- Cache / Broker ----
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -29,44 +25,31 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # ---- Search ----
   meilisearch:
     image: getmeili/meilisearch:v1.13
     environment:
       MEILI_MASTER_KEY: master-key
       MEILI_NO_ANALYTICS: "true"
-    ports:
-      - "7700:7700"
     volumes:
       - meili_data:/meili_data
     restart: unless-stopped
 
-  # ---- Vector DB ----
   qdrant:
     image: qdrant/qdrant:latest
-    ports:
-      - "6333:6333"
-      - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
 
-  # ---- Backend API ----
   backend:
     build: ../backend
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"   # Only localhost, nginx proxies
     environment:
       DATABASE_URL: "postgresql+asyncpg://homelocus:homelocus@postgres:5432/homelocus"
       DATABASE_URL_SYNC: "postgresql://homelocus:homelocus@postgres:5432/homelocus"
       REDIS_URL: "redis://redis:6379/0"
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       STORAGE_LOCAL_PATH: "/data/uploads"
-      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-minio:9000}
-      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-minioadmin}
-      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-minioadmin}
-      STORAGE_BUCKET: ${STORAGE_BUCKET:-homelocus}
-      STORAGE_SECURE: "false"
       QDRANT_URL: "http://qdrant:6333"
       MEILISEARCH_URL: "http://meilisearch:7700"
       MEILISEARCH_API_KEY: "master-key"
@@ -84,7 +67,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # ---- Celery Worker ----
   celery-worker:
     build:
       context: ../backend
@@ -95,10 +77,6 @@ services:
       REDIS_URL: "redis://redis:6379/0"
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       STORAGE_LOCAL_PATH: "/data/uploads"
-      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-minio:9000}
-      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-minioadmin}
-      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-minioadmin}
-      STORAGE_BUCKET: ${STORAGE_BUCKET:-homelocus}
       QDRANT_URL: "http://qdrant:6333"
       MEILISEARCH_URL: "http://meilisearch:7700"
       MEILISEARCH_API_KEY: "master-key"
@@ -116,7 +94,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # ---- Celery Beat (scheduler) ----
   celery-beat:
     build:
       context: ../backend
@@ -125,12 +102,6 @@ services:
     environment:
       DATABASE_URL: "postgresql+asyncpg://homelocus:homelocus@postgres:5432/homelocus"
       REDIS_URL: "redis://redis:6379/0"
-      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
-      STORAGE_LOCAL_PATH: "/data/uploads"
-      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-minio:9000}
-      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-minioadmin}
-      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-minioadmin}
-      STORAGE_BUCKET: ${STORAGE_BUCKET:-homelocus}
       QDRANT_URL: "http://qdrant:6333"
       MEILISEARCH_URL: "http://meilisearch:7700"
       MEILISEARCH_API_KEY: "master-key"
