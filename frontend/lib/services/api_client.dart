@@ -3,17 +3,27 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 class ApiClient {
-  /// Default API base URL. Configurable in login screen settings.
   static String baseUrl = 'https://home.ajcheng.com:8443/api/v1';
+  static String? authToken; // Set after login, used by all instances
 
   final String _baseUrl;
+  final String? _token;
   final http.Client _client = http.Client();
 
-  ApiClient({String? baseUrl}) : _baseUrl = baseUrl ?? ApiClient.baseUrl;
+  ApiClient({String? baseUrl, String? token})
+      : _baseUrl = baseUrl ?? ApiClient.baseUrl,
+        _token = token ?? ApiClient.authToken;
+
+  Map<String, String> get _headers {
+    final h = <String, String>{'Content-Type': 'application/json'};
+    if (_token != null) h['Authorization'] = 'Bearer $_token';
+    return h;
+  }
 
   Future<dynamic> get(String path) async {
     final response = await _client.get(
       Uri.parse('$_baseUrl$path'),
+      headers: _token != null ? {'Authorization': 'Bearer $_token'} : {},
     ).timeout(const Duration(seconds: 10));
     return _handleResponse(response);
   }
@@ -21,7 +31,7 @@ class ApiClient {
   Future<dynamic> post(String path, {Object? body}) async {
     final response = await _client.post(
       Uri.parse('$_baseUrl$path'),
-      headers: {'Content-Type': 'application/json'},
+      headers: _headers,
       body: body != null ? jsonEncode(body) : null,
     ).timeout(const Duration(seconds: 10));
     return _handleResponse(response);
@@ -30,7 +40,7 @@ class ApiClient {
   Future<dynamic> put(String path, {Object? body}) async {
     final response = await _client.put(
       Uri.parse('$_baseUrl$path'),
-      headers: {'Content-Type': 'application/json'},
+      headers: _headers,
       body: body != null ? jsonEncode(body) : null,
     ).timeout(const Duration(seconds: 10));
     return _handleResponse(response);
@@ -39,6 +49,7 @@ class ApiClient {
   Future<dynamic> delete(String path) async {
     final response = await _client.delete(
       Uri.parse('$_baseUrl$path'),
+      headers: _headers,
     ).timeout(const Duration(seconds: 10));
     return _handleResponse(response);
   }
@@ -47,6 +58,7 @@ class ApiClient {
     final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl$path'));
     request.files.add(await http.MultipartFile.fromPath('file', imageFile.path));
     request.fields.addAll(fields);
+    if (_token != null) request.headers['Authorization'] = 'Bearer $_token';
     return request.send();
   }
 

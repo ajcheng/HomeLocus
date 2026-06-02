@@ -53,6 +53,11 @@ class _LoginScreenState extends State<LoginScreen> {
       });
       final token = data['access_token'];
       final user = data['user'];
+
+      // Set global auth for all subsequent API calls
+      ApiClient.authToken = token;
+      ApiClient.baseUrl = url;
+
       if (mounted) {
         Navigator.pushReplacementNamed(context, '/home', arguments: {'token': token, 'user': user});
       }

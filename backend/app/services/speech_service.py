@@ -13,54 +13,122 @@ from app.schemas.speech import ParsedItem, MatchedSlot
 
 logger = logging.getLogger(__name__)
 
+PARSE_PROMPT = """Extract structured item information from this Chinese natural language input about home storage.
+
+User input: "{text}"
+
+Return ONLY a JSON object:
+{{
+  "items": [
+    {{
+      "label": "Item name (be specific, include brand if mentioned)",
+      "brand": "Brand name if mentioned",
+      "category": "category",
+      "tags": ["tag1", "tag2"],
+      "is_chargeable": false,
+      "slot_name_hint": "层级/抽屉名称提示",
+      "container_name_hint": "储物模块名称提示",
+      "zone_name_hint": "分区名称提示"
+    }}
+  ]
+}}
+
+Rules:
+- Extract ALL items mentioned
+- slot_name_hint: the drawer/layer name (e.g., "第二层抽屉", "左侧挂衣区")
+- container_name_hint: the storage unit name (e.g., "大衣柜", "电视柜", "书桌")
+- zone_name_hint: the room/area name (e.g., "主卧", "客厅", "书房")
+- is_chargeable: true for electronics, battery tools, rechargeable devices
+- If no location hints found, leave them as empty strings"""
+
 
 class SpeechService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def transcribe(self, audio_path: str) -> str:
-        """
-        Speech-to-text using DeepSeek API or local whisper.
-        """
-        # TODO: Implement ASR with OpenAI Whisper API or DeepSeek audio endpoint
-        # For now, placeholder
-        return ""
-
     async def parse_item_from_text(self, text: str) -> ParsedItem:
-        """
-        Use LLM to extract structured item info from natural language.
-        Examples:
-        - "主卧大衣柜第二层放了罗技MX Master 3鼠标"
-        - "书房的五斗柜第一层有发票"
-        """
-        # Fallback regex-based parsing (placeholder until LLM integration)
-        return ParsedItem(label=text)
+        """Use AI to extract structured item info from natural language."""
+        if not settings.ai_api_key:
+            return self._regex_parse(text)
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    settings.ai_base_url.rstrip("/") + "/anthropic/v1/messages",
+                    headers={
+                        "x-api-key": settings.ai_api_key,
+                        "anthropic-version": "2023-06-01",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": settings.ai_model,
+                        "max_tokens": 500,
+                        "messages": [{"role": "user", "content": PARSE_PROMPT.format(text=text)}],
+                    },
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    content = result["content"][0]["text"]
+                    content = content.strip()
+                    if content.startswith("```"):
+                        content = content.split("\n", 1)[1].rsplit("\n```", 1)[0]
+                    data = json.loads(content)
+                    items = data.get("items", [])
+                    if items:
+                        first = items[0]
+                        return ParsedItem(
+                            label=first.get("label", text),
+                            brand=first.get("brand"),
+                            category=first.get("category"),
+                            tags=first.get("tags", []),
+                            is_chargeable=first.get("is_chargeable", False),
+                            slot_name_hint=first.get("slot_name_hint"),
+                            container_name_hint=first.get("container_name_hint"),
+                            zone_name_hint=first.get("zone_name_hint"),
+                        )
+        except Exception as e:
+            logger.error(f"NLP parsing failed: {e}")
+
+        return self._regex_parse(text)
+
+    def _regex_parse(self, text: str) -> ParsedItem:
+        """Fallback: simple regex parsing."""
+        import re
+        item = ParsedItem(label=text)
+
+        # Try: "zone container slot 有/放了 item"
+        m = re.match(r'(\S+?)(\S+?)(\S+?)[有放]{1,2}(.+)', text)
+        if m:
+            item.zone_name_hint = m.group(1)
+            item.container_name_hint = m.group(2)
+            item.slot_name_hint = m.group(3)
+            item.label = m.group(4).strip()
+
+        # Check for chargeable keywords
+        charge_keywords = ['充电', '电池', '电子', '手机', '平板', '电脑', '笔记本', '耳机', '相机', '电钻']
+        for kw in charge_keywords:
+            if kw in text:
+                item.is_chargeable = True
+                break
+
+        return item
 
     async def try_match_slot(self, parsed: ParsedItem, location_id: str | None = None) -> MatchedSlot | None:
-        """
-        Try to find the closest matching slot from parsed hints.
-        """
-        stmt = select(Slot).options(
+        stmt = select(Slot).join(Container, Slot.container_id == Container.id).join(Zone, Container.zone_id == Zone.id).options(
             selectinload(Slot.container).selectinload(Container.zone).selectinload(Zone.location)
         )
 
-        if parsed.slot_name_hint or parsed.container_name_hint:
-            conditions = []
-            if parsed.slot_name_hint:
-                conditions.append(Slot.name.ilike(f"%{parsed.slot_name_hint}%"))
-            if parsed.container_name_hint:
-                conditions.append(Container.name.ilike(f"%{parsed.container_name_hint}%"))
-            # Join chain
-            stmt = (
-                select(Slot)
-                .join(Container, Slot.container_id == Container.id)
-                .join(Zone, Container.zone_id == Zone.id)
-                .options(
-                    selectinload(Slot.container).selectinload(Container.zone).selectinload(Zone.location)
-                )
-                .where(or_(*conditions))
-            )
+        # Build fuzzy match conditions
+        conditions = []
+        if parsed.slot_name_hint:
+            conditions.append(Slot.name.ilike(f"%{parsed.slot_name_hint}%"))
+        if parsed.container_name_hint:
+            conditions.append(Container.name.ilike(f"%{parsed.container_name_hint}%"))
+        if parsed.zone_name_hint:
+            conditions.append(Zone.name.ilike(f"%{parsed.zone_name_hint}%"))
 
+        if conditions:
+            stmt = stmt.where(or_(*conditions))
         if location_id:
             stmt = stmt.where(Zone.location_id == location_id)
 
@@ -71,30 +139,19 @@ class SpeechService:
         if not slot:
             return None
 
-        container = slot.container
-        zone = container.zone
-        location = zone.location
-
+        c = slot.container
+        z = c.zone
+        loc = z.location
         return MatchedSlot(
-            slot_id=slot.id,
-            slot_name=slot.name,
-            container_name=container.name,
-            zone_name=zone.name,
-            location_name=location.name,
-            breadcrumb=f"{location.name} / {zone.name} / {container.name} / {slot.name}",
+            slot_id=slot.id, slot_name=slot.name,
+            container_name=c.name, zone_name=z.name,
+            location_name=loc.name,
+            breadcrumb=f"{loc.name} / {z.name} / {c.name} / {slot.name}",
         )
 
     async def add_item_from_speech(self, parsed: ParsedItem, slot_id: str) -> Item:
-        """
-        Create an item record from speech-parsed data.
-        """
-        item = Item(
-            slot_id=slot_id,
-            label=parsed.label,
-            brand=parsed.brand,
-            tags=parsed.tags,
-            is_chargeable=parsed.is_chargeable,
-        )
+        item = Item(slot_id=slot_id, label=parsed.label, brand=parsed.brand,
+                     tags=parsed.tags, is_chargeable=parsed.is_chargeable)
         self.db.add(item)
         await self.db.commit()
         await self.db.refresh(item)
