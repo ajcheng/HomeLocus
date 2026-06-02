@@ -58,6 +58,10 @@ class _LoginScreenState extends State<LoginScreen> {
       ApiClient.authToken = token;
       ApiClient.baseUrl = url;
 
+      // Persist for next app launch
+      await prefs.setString('auth_token', token);
+      await prefs.setString('server_url', url);
+
       if (mounted) {
         Navigator.pushReplacementNamed(context, '/home', arguments: {'token': token, 'user': user});
       }
