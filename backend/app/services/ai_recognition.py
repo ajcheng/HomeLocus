@@ -43,7 +43,7 @@ class AIRecognitionService:
     def __init__(self):
         self.api_key = settings.ai_api_key
         self.base_url = settings.ai_base_url.rstrip("/") + "/v1"
-        self.model = settings.ai_model
+        self.model = settings.ai_vision_model  # Vision-capable model
 
     async def analyze_image(self, image_path: str) -> dict:
         """
