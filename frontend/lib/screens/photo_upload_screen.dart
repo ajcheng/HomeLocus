@@ -43,7 +43,7 @@ class _PhotoUploadScreenState extends State<PhotoUploadScreen> {
   Future<void> _pickSlot(String locationId) async {
     setState(() => _selectedLocationId = locationId);
 
-    // Load zones for this location
+    // Load zones
     List<dynamic> zones = [];
     try {
       zones = await _api.get('/space/zones?location_id=$locationId') as List;
@@ -51,8 +51,42 @@ class _PhotoUploadScreenState extends State<PhotoUploadScreen> {
 
     if (!mounted) return;
 
-    // Show zone picker
-    final zoneCtrl = TextEditingController();
+    if (zones.isEmpty) {
+      // No zones: create one first
+      final zoneNameCtrl = TextEditingController();
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('创建分区'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('该地点还没有分区，请先创建一个', style: TextStyle(color: Colors.grey)),
+            const SizedBox(height: 8),
+            TextField(controller: zoneNameCtrl, autofocus: true, decoration: const InputDecoration(labelText: '分区名称', hintText: '如：客厅、主卧')),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('创建')),
+          ],
+        ),
+      );
+      if (ok == true && zoneNameCtrl.text.isNotEmpty) {
+        try {
+          final zData = await _api.post('/space/zones', body: {'location_id': locationId, 'name': zoneNameCtrl.text});
+          zones = [zData];
+        } catch (e) {
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+          return;
+        }
+      } else {
+        return;
+      }
+    }
+
+    if (!mounted) return;
+
+    // Show zone picker + container/slot creation
+    String? selectedZoneId;
+    String? selectedZoneName;
     final containerCtrl = TextEditingController();
     final slotCtrl = TextEditingController();
 
@@ -60,43 +94,49 @@ class _PhotoUploadScreenState extends State<PhotoUploadScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDlgState) => AlertDialog(
-          title: const Text('选择或创建储物位置'),
+          title: const Text('选择储物位置'),
           content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              if (zones.isNotEmpty) ...[
-                const Text('选择分区:', style: TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                ...zones.map((z) => ListTile(
-                  title: Text(z['name'] ?? ''),
-                  leading: const Icon(Icons.crop_square),
-                  onTap: () {
-                    zoneCtrl.text = z['id'];
-                    setDlgState(() {});
-                  },
-                )),
-                const Divider(),
-              ],
-              TextField(controller: containerCtrl, decoration: const InputDecoration(labelText: '储物模块名称', hintText: '如：电视柜')),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('1. 选择分区:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Wrap(spacing: 6, children: zones.map((z) => ChoiceChip(
+                label: Text(z['name'] ?? ''),
+                selected: selectedZoneId == z['id'],
+                onSelected: (sel) {
+                  setDlgState(() {
+                    selectedZoneId = sel ? z['id'] : null;
+                    selectedZoneName = sel ? z['name'] : null;
+                  });
+                },
+              )).toList()),
+              if (selectedZoneId == null)
+                const Padding(padding: EdgeInsets.only(top: 4), child: Text('请先选择一个分区', style: TextStyle(color: Colors.red, fontSize: 12))),
+              const SizedBox(height: 16),
+              const Text('2. 储物模块和层级:', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              TextField(controller: slotCtrl, decoration: const InputDecoration(labelText: '层级/抽屉名称', hintText: '如：第二层抽屉')),
+              TextField(controller: containerCtrl, decoration: const InputDecoration(labelText: '储物模块', hintText: '如：电视柜', border: OutlineInputBorder())),
+              const SizedBox(height: 8),
+              TextField(controller: slotCtrl, decoration: const InputDecoration(labelText: '层级/抽屉', hintText: '如：第二层抽屉', border: OutlineInputBorder())),
             ]),
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
             FilledButton(
               onPressed: () async {
-                if (containerCtrl.text.isEmpty || slotCtrl.text.isEmpty) return;
+                if (selectedZoneId == null || containerCtrl.text.isEmpty || slotCtrl.text.isEmpty) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('请填写完整信息')));
+                  return;
+                }
                 try {
-                  // Create container with slot
                   final result = await _api.post('/space/containers', body: {
-                    'zone_id': zoneCtrl.text.isNotEmpty ? zoneCtrl.text : null,
+                    'zone_id': selectedZoneId,
                     'name': containerCtrl.text,
                     'slots': [{'name': slotCtrl.text, 'level': 1}],
                   });
-                  if (result is Map && result['slots'] != null) {
+                  if (result is Map && result['slots'] != null && (result['slots'] as List).isNotEmpty) {
                     setState(() {
                       _selectedSlotId = (result['slots'] as List).first['id'];
-                      _selectedSlotName = '${result['name']} / ${slotCtrl.text}';
+                      _selectedSlotName = '$selectedZoneName / ${result['name']} / ${slotCtrl.text}';
                     });
                   }
                   if (mounted) Navigator.pop(ctx, true);
@@ -156,14 +196,18 @@ class _PhotoUploadScreenState extends State<PhotoUploadScreen> {
                   selected: _selectedLocationId == l['id'],
                   onSelected: (_) => _pickSlot(l['id']),
                 )).toList()),
+                if (_locations.isEmpty) const Text('请先在「空间」页创建地点', style: TextStyle(color: Colors.grey)),
+
                 if (_selectedSlotId != null) ...[
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
                   Card(color: Colors.green.shade50, child: Padding(padding: const EdgeInsets.all(12), child: Row(children: [
                     const Icon(Icons.check_circle, color: Colors.green),
                     const SizedBox(width: 8),
                     Expanded(child: Text('位置: $_selectedSlotName')),
+                    IconButton(icon: const Icon(Icons.edit, size: 18), onPressed: () => _pickSlot(_selectedLocationId!)),
                   ]))),
                 ],
+
                 const SizedBox(height: 20),
                 Text('2. 拍照', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
