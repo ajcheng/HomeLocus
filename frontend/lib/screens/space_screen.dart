@@ -107,6 +107,28 @@ class _LocationTileState extends State<_LocationTile> {
     }
   }
 
+  Future<void> _deleteLocation() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除地点'),
+        content: Text('确定删除「${widget.loc['name']}」及其所有分区、储物模块和物品？此操作不可恢复。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(style: FilledButton.styleFrom(backgroundColor: Colors.red), onPressed: () => Navigator.pop(ctx, true), child: const Text('删除')),
+        ],
+      ),
+    );
+    if (ok == true) {
+      try {
+        await widget.api.delete('/space/locations/${widget.loc['id']}');
+        widget.onRefresh();
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
   Future<void> _addZone() async {
     final ctrl = TextEditingController();
     final ok = await showDialog<bool>(
@@ -140,6 +162,7 @@ class _LocationTileState extends State<_LocationTile> {
         leading: const Icon(Icons.location_city, color: Colors.blue),
         title: Text(widget.loc['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
         subtitle: Text('${widget.loc['zone_count'] ?? 0} 个分区'),
+        trailing: IconButton(icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20), onPressed: _deleteLocation),
         onExpansionChanged: (exp) { if (exp) _loadZones(); },
         children: [
           if (_zones != null)

@@ -6,7 +6,33 @@ from sqlalchemy.orm import selectinload
 
 from app.models.family import Family, FamilyMember, Invitation
 from app.models.user import User
+from app.models.space import Location, Zone, Container, Slot
 from app.schemas import family as schemas
+
+# Preset template: zone_name → [(container_name, [(slot_name, level)])]
+FAMILY_SPACE_TEMPLATE = {
+    "客厅": [
+        ("电视柜", [("左侧抽屉", 1), ("右侧抽屉", 2), ("中间柜子", 3)]),
+        ("茶几", [("下层", 1)]),
+        ("鞋柜", [("上层", 1), ("下层", 2)]),
+    ],
+    "主卧": [
+        ("大衣柜", [("上层", 1), ("挂衣区", 2), ("下层抽屉", 3)]),
+        ("床头柜", [("抽屉", 1)]),
+        ("床底储物", [("左侧", 1), ("右侧", 2)]),
+    ],
+    "阳台": [
+        ("储物柜", [("上层", 1), ("下层", 2)]),
+    ],
+    "厨房": [
+        ("橱柜", [("上层", 1), ("下层", 2), ("抽屉", 3)]),
+        ("吊柜", [("左侧", 1), ("右侧", 2)]),
+    ],
+    "卫生间": [
+        ("镜柜", [("内部", 1)]),
+        ("浴室柜", [("下层", 1)]),
+    ],
+}
 
 
 class FamilyService:
@@ -22,6 +48,26 @@ class FamilyService:
         # Creator is admin
         member = FamilyMember(family_id=family.id, user_id=user.id, role="admin")
         self.db.add(member)
+
+        # Auto-create family space with preset zones/containers/slots
+        location = Location(name=name, is_default=False)
+        self.db.add(location)
+        await self.db.flush()
+
+        for zone_name, containers in FAMILY_SPACE_TEMPLATE.items():
+            zone = Zone(location_id=location.id, name=zone_name)
+            self.db.add(zone)
+            await self.db.flush()
+
+            for container_name, slots in containers:
+                container = Container(zone_id=zone.id, name=container_name)
+                self.db.add(container)
+                await self.db.flush()
+
+                for slot_name, level in slots:
+                    slot = Slot(container_id=container.id, name=slot_name, level=level)
+                    self.db.add(slot)
+
         await self.db.commit()
         await self.db.refresh(family)
         return family
@@ -126,7 +172,6 @@ class FamilyService:
         if not inv or inv.use_count >= inv.max_uses:
             return None
 
-        # Check not already a member
         existing = await self.db.execute(
             select(FamilyMember).where(
                 FamilyMember.family_id == inv.family_id,
@@ -143,7 +188,6 @@ class FamilyService:
         return await self.get_family(inv.family_id)
 
     async def check_access(self, user: User, family_id: str) -> str | None:
-        """Check if user has access to this family. Returns role or None."""
         result = await self.db.execute(
             select(FamilyMember.role).where(
                 FamilyMember.family_id == family_id,

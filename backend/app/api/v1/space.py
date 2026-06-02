@@ -24,6 +24,14 @@ async def list_locations(svc: SpaceService = Depends(get_space_service)):
     return await svc.list_locations()
 
 
+@router.delete("/locations/{location_id}")
+async def delete_location(location_id: str, svc: SpaceService = Depends(get_space_service)):
+    ok = await svc.delete_location(location_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Location not found")
+    return {"status": "deleted"}
+
+
 # ---- Zone ----
 @router.post("/zones", response_model=schemas.ZoneResponse)
 async def create_zone(data: schemas.ZoneCreate, svc: SpaceService = Depends(get_space_service)):

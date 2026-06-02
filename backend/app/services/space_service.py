@@ -43,6 +43,14 @@ class SpaceService:
     async def get_location(self, location_id: str) -> Location | None:
         return await self.db.get(Location, location_id)
 
+    async def delete_location(self, location_id: str) -> bool:
+        loc = await self.db.get(Location, location_id)
+        if not loc:
+            return False
+        await self.db.delete(loc)
+        await self.db.commit()
+        return True
+
     # ---- Zone ----
     async def create_zone(self, data: schemas.ZoneCreate) -> Zone:
         zone = Zone(location_id=data.location_id, name=data.name, template_type=data.template_type)
