@@ -38,20 +38,21 @@ If you cannot identify any items clearly, return: {"items": [], "summary": "No c
 
 
 class AIRecognitionService:
-    """AI-powered image recognition using Anthropic-compatible Vision API."""
+    """AI-powered image recognition (OpenAI-compatible or Anthropic Vision API)."""
 
     def __init__(self):
         self.api_key = settings.ai_api_key
-        # Use Anthropic-compatible endpoint for vision (supports image input)
-        self.base_url = settings.ai_base_url.rstrip("/") + "/anthropic/v1/messages"
+        self.base_url = settings.ai_base_url.rstrip("/")
         self.model = settings.ai_vision_model
+
+    def _prefers_openai_api(self) -> bool:
+        return settings.ai_provider in ("openai", "custom")
 
     async def analyze_image(self, image_path: str) -> dict:
         if not self.api_key:
             return self._simulate_detection(image_path)
 
         try:
-            # Resize and encode image
             img = Image.open(image_path).convert("RGB")
             if max(img.size) > 1024:
                 ratio = 1024 / max(img.size)
@@ -60,9 +61,61 @@ class AIRecognitionService:
             img.save(buf, format="JPEG", quality=70)
             image_b64 = base64.b64encode(buf.getvalue()).decode()
 
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            if self._prefers_openai_api():
+                result = await self._try_openai_format(image_b64)
+                if result.get("items") is not None or result.get("summary"):
+                    return result
+                return await self._try_anthropic_format(image_b64)
+
+            result = await self._try_anthropic_format(image_b64)
+            if result.get("items") is not None or result.get("summary"):
+                return result
+            return await self._try_openai_format(image_b64)
+
+        except Exception as e:
+            logger.error(f"Vision API failed: {e}, falling back to simulation")
+            return self._simulate_detection(image_path)
+
+    async def _try_openai_format(self, image_b64: str) -> dict:
+        """OpenAI-compatible vision (FlowBar / OpenAI / DeepSeek relay)."""
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
-                    self.base_url,
+                    f"{self.base_url}/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "messages": [{
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": DETECTION_PROMPT},
+                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+                            ],
+                        }],
+                        "max_tokens": 4096,
+                    },
+                )
+                if response.status_code != 200:
+                    logger.error(f"OpenAI vision error {response.status_code}: {response.text[:300]}")
+                    return {"items": [], "summary": ""}
+                result = response.json()
+                content = result["choices"][0]["message"]["content"] or ""
+                if not content.strip():
+                    content = result["choices"][0]["message"].get("reasoning_content", "")
+                return self._parse_vision_response(content)
+        except Exception as e:
+            logger.error(f"OpenAI vision failed: {e}")
+            return {"items": [], "summary": ""}
+
+    async def _try_anthropic_format(self, image_b64: str) -> dict:
+        """Anthropic-compatible vision endpoint."""
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/anthropic/v1/messages",
                     headers={
                         "x-api-key": self.api_key,
                         "anthropic-version": "2023-06-01",
@@ -88,49 +141,14 @@ class AIRecognitionService:
                     },
                 )
                 if response.status_code != 200:
-                    logger.error(f"Vision API error {response.status_code}: {response.text[:500]}")
-                    # Try OpenAI-compatible format as fallback
-                    return await self._try_openai_format(image_b64)
-
+                    logger.error(f"Anthropic vision error {response.status_code}: {response.text[:300]}")
+                    return {"items": [], "summary": ""}
                 result = response.json()
                 content = result["content"][0]["text"]
                 return self._parse_vision_response(content)
-
         except Exception as e:
-            logger.error(f"Vision API failed: {e}, falling back to simulation")
-            return self._simulate_detection(image_path)
-
-    async def _try_openai_format(self, image_b64: str) -> dict:
-        """Fallback: try OpenAI-compatible format."""
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    settings.ai_base_url.rstrip("/") + "/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": self.model,
-                        "messages": [{
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": DETECTION_PROMPT},
-                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
-                            ],
-                        }],
-                        "max_tokens": 2048,
-                    },
-                )
-                if response.status_code != 200:
-                    logger.error(f"OpenAI format also failed {response.status_code}: {response.text[:300]}")
-                    return self._simulate_detection("")
-                result = response.json()
-                content = result["choices"][0]["message"]["content"]
-                return self._parse_vision_response(content)
-        except Exception as e:
-            logger.error(f"OpenAI fallback failed: {e}")
-            return self._simulate_detection("")
+            logger.error(f"Anthropic vision failed: {e}")
+            return {"items": [], "summary": ""}
 
     def _parse_vision_response(self, content: str) -> dict:
         content = content.strip()

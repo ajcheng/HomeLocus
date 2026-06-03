@@ -52,9 +52,67 @@ class SpeechService:
             return self._regex_parse(text)
 
         try:
+            content = await self._llm_parse(PARSE_PROMPT.format(text=text))
+            if content:
+                data = json.loads(content)
+                items = data.get("items", [])
+                if items:
+                    first = items[0]
+                    return ParsedItem(
+                        label=first.get("label", text),
+                        brand=first.get("brand"),
+                        category=first.get("category"),
+                        tags=first.get("tags", []),
+                        is_chargeable=first.get("is_chargeable", False),
+                        slot_name_hint=first.get("slot_name_hint"),
+                        container_name_hint=first.get("container_name_hint"),
+                        zone_name_hint=first.get("zone_name_hint"),
+                    )
+        except Exception as e:
+            logger.error(f"NLP parsing failed: {e}")
+
+        return self._regex_parse(text)
+
+    async def _llm_parse(self, prompt: str) -> str | None:
+        prefer_openai = settings.ai_provider in ("openai", "custom")
+
+        if prefer_openai:
+            content = await self._openai_chat(prompt)
+            if content:
+                return content
+            return await self._anthropic_chat(prompt)
+        content = await self._anthropic_chat(prompt)
+        if content:
+            return content
+        return await self._openai_chat(prompt)
+
+    async def _openai_chat(self, prompt: str) -> str | None:
+        try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
-                    settings.ai_base_url.rstrip("/") + "/anthropic/v1/messages",
+                    f"{settings.ai_base_url.rstrip('/')}/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {settings.ai_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": settings.ai_model,
+                        "max_tokens": 500,
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                )
+                if response.status_code != 200:
+                    return None
+                content = response.json()["choices"][0]["message"]["content"].strip()
+                return self._strip_code_fence(content)
+        except Exception:
+            return None
+
+    async def _anthropic_chat(self, prompt: str) -> str | None:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{settings.ai_base_url.rstrip('/')}/anthropic/v1/messages",
                     headers={
                         "x-api-key": settings.ai_api_key,
                         "anthropic-version": "2023-06-01",
@@ -63,33 +121,21 @@ class SpeechService:
                     json={
                         "model": settings.ai_model,
                         "max_tokens": 500,
-                        "messages": [{"role": "user", "content": PARSE_PROMPT.format(text=text)}],
+                        "messages": [{"role": "user", "content": prompt}],
                     },
                 )
-                if response.status_code == 200:
-                    result = response.json()
-                    content = result["content"][0]["text"]
-                    content = content.strip()
-                    if content.startswith("```"):
-                        content = content.split("\n", 1)[1].rsplit("\n```", 1)[0]
-                    data = json.loads(content)
-                    items = data.get("items", [])
-                    if items:
-                        first = items[0]
-                        return ParsedItem(
-                            label=first.get("label", text),
-                            brand=first.get("brand"),
-                            category=first.get("category"),
-                            tags=first.get("tags", []),
-                            is_chargeable=first.get("is_chargeable", False),
-                            slot_name_hint=first.get("slot_name_hint"),
-                            container_name_hint=first.get("container_name_hint"),
-                            zone_name_hint=first.get("zone_name_hint"),
-                        )
-        except Exception as e:
-            logger.error(f"NLP parsing failed: {e}")
+                if response.status_code != 200:
+                    return None
+                content = response.json()["content"][0]["text"].strip()
+                return self._strip_code_fence(content)
+        except Exception:
+            return None
 
-        return self._regex_parse(text)
+    @staticmethod
+    def _strip_code_fence(content: str) -> str:
+        if content.startswith("```"):
+            content = content.split("\n", 1)[1].rsplit("\n```", 1)[0]
+        return content.strip()
 
     def _regex_parse(self, text: str) -> ParsedItem:
         """Fallback: simple regex parsing."""
