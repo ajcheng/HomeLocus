@@ -1,3 +1,4 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -39,6 +40,15 @@ class Settings(BaseSettings):
     jwt_secret: str = "homelocus-dev-secret-change-in-production"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+    @model_validator(mode="after")
+    def derive_sync_database_url(self):
+        """Celery workers often only get DATABASE_URL; derive sync URL for psycopg2."""
+        if "+asyncpg" in self.database_url:
+            self.database_url_sync = self.database_url.replace(
+                "postgresql+asyncpg://", "postgresql://", 1
+            )
+        return self
 
 
 settings = Settings()

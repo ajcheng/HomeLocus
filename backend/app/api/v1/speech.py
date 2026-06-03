@@ -3,6 +3,7 @@ import uuid
 import tempfile
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -55,13 +56,19 @@ async def speech_add_item(
         os.unlink(tmp_path)
 
 
+class AddItemTextRequest(BaseModel):
+    text: str
+    location_id: str | None = None
+
+
 @router.post("/add-item-text", response_model=schemas.SpeechAddItemResponse)
 async def speech_add_item_text(
-    text: str = Form(...),
-    location_id: str = Form(""),
+    data: AddItemTextRequest,
     svc: SpeechService = Depends(get_speech_service),
 ):
-    """Parse natural language text (no audio file needed)."""
+    """Parse natural language text (JSON body from mobile app)."""
+    text = data.text
+    location_id = data.location_id or ""
     parsed = await svc.parse_item_from_text(text)
     matched = await svc.try_match_slot(parsed, location_id if location_id else None)
     return schemas.SpeechAddItemResponse(

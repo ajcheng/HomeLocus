@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'dart:async';
+import '../app/app_state.dart';
 import '../services/api_client.dart';
 
 class VoiceInputScreen extends StatefulWidget {
@@ -13,40 +15,57 @@ class VoiceInputScreen extends StatefulWidget {
 class _VoiceInputScreenState extends State<VoiceInputScreen> {
   final _api = ApiClient();
   final _textCtrl = TextEditingController();
+  final _textFocus = FocusNode();
   bool _isRecording = false;
   bool _loading = false;
+  bool _recordCompleted = false;
   String? _result;
   String? _error;
   int _recordSeconds = 0;
   Timer? _timer;
   String _statusText = '点击麦克风开始语音输入';
 
+  bool get _canSubmit =>
+      !_loading && _textCtrl.text.trim().isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    _textCtrl.addListener(() => setState(() {}));
+  }
+
   @override
   void dispose() {
     _timer?.cancel();
     _textCtrl.dispose();
+    _textFocus.dispose();
     super.dispose();
   }
 
   Future<void> _toggleRecording() async {
     if (_isRecording) {
-      // Stop recording
       _timer?.cancel();
       setState(() {
         _isRecording = false;
+        _recordCompleted = true;
         _statusText = '录音完成，$_recordSeconds 秒';
       });
 
-      // Process the text if something was typed or use default
       if (_textCtrl.text.trim().isNotEmpty) {
         await _processText(_textCtrl.text.trim());
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('录音已结束。请在下方输入物品描述（如：主卧大衣柜第二层放了鼠标），再点「智能识别并添加」'),
+            duration: Duration(seconds: 4),
+          ),
+        );
+        _textFocus.requestFocus();
       }
     } else {
-      // Start recording — for now use simulated recording
-      // Real audio capture needs platform-specific plugins
-      // Instead, we focus on the text NLP pipeline which works reliably
       setState(() {
         _isRecording = true;
+        _recordCompleted = false;
         _recordSeconds = 0;
         _statusText = '正在录音... 请说出物品信息';
         _error = null;
@@ -57,7 +76,6 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
         setState(() => _recordSeconds++);
       });
 
-      // Auto-stop after 10 seconds
       Future.delayed(const Duration(seconds: 10), () {
         if (_isRecording && mounted) {
           _toggleRecording();
@@ -100,13 +118,12 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
             'slot_id': slot['slot_id'],
           });
           if (mounted) {
+            context.read<AppState>().refreshSearchItems();
             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('物品已添加')));
             Navigator.pop(context);
           }
         }
       } else {
-        // No matched slot — try parsing the text for item info
-        final summary = data is Map ? (data['parsed_item'] ?? {}).toString() : '';
         setState(() => _error = '未能自动匹配位置。请尝试：\n"房间名+储物柜+层级+物品名"\n如："主卧大衣柜第二层放了鼠标"');
       }
     } catch (e) {
@@ -122,12 +139,10 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(children: [
-          // Status card
           Card(
             child: Padding(
               padding: const EdgeInsets.all(24),
               child: Column(children: [
-                // Animated mic icon
                 GestureDetector(
                   onTap: _loading ? null : _toggleRecording,
                   child: AnimatedContainer(
@@ -162,33 +177,39 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
                   const SizedBox(height: 8),
                   Text('点击麦克风停止录音', style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
                 ],
+                if (_recordCompleted && !_isRecording) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '当前为模拟录音，请在下方文字框输入描述',
+                    style: TextStyle(color: Colors.orange.shade700, fontSize: 12),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ]),
             ),
           ),
           const SizedBox(height: 16),
-
-          // Text input
           TextField(
             controller: _textCtrl,
+            focusNode: _textFocus,
             maxLines: 3,
             decoration: InputDecoration(
-              labelText: '或直接输入物品描述',
+              labelText: '输入物品描述（必填）',
               hintText: '主卧大衣柜第二层有罗技鼠标和充电宝',
               border: const OutlineInputBorder(),
+              helperText: _recordCompleted ? '输入后即可点击「智能识别并添加」' : null,
             ),
             enabled: !_loading,
+            onSubmitted: _canSubmit ? (v) => _processText(v.trim()) : null,
           ),
           const SizedBox(height: 12),
           Text('示例: 「客厅电视柜左侧抽屉放了充电宝和发票」',
               style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
-
           const SizedBox(height: 12),
-
-          // Submit button
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: (_loading || _textCtrl.text.trim().isEmpty) ? null : () => _processText(_textCtrl.text.trim()),
+              onPressed: _canSubmit ? () => _processText(_textCtrl.text.trim()) : null,
               icon: _loading
                   ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                   : const Icon(Icons.psychology),
@@ -196,10 +217,7 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
               style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
             ),
           ),
-
           const SizedBox(height: 16),
-
-          // Results
           if (_result != null)
             Card(color: Colors.green.shade50, child: Padding(padding: const EdgeInsets.all(16), child: Text(_result!)))
           else if (_error != null)

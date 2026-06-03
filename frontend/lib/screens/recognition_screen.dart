@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../app/app_state.dart';
 import '../services/api_client.dart';
 
 class RecognitionResultScreen extends StatefulWidget {
@@ -24,7 +26,8 @@ class _RecognitionResultScreenState extends State<RecognitionResultScreen> {
   }
 
   Future<void> _pollTask() async {
-    for (var i = 0; i < 30; i++) {
+    // Vision AI can take ~100s; poll up to ~3 minutes
+    for (var i = 0; i < 90; i++) {
       await Future.delayed(const Duration(seconds: 2));
       try {
         final data = await _api.get('/items/task-status/${widget.taskId}');
@@ -81,11 +84,16 @@ class _RecognitionResultScreenState extends State<RecognitionResultScreen> {
               try {
                 await _api.put('/items/confirm/${item['id']}', body: {
                   'confirmed_label': ctrl.text,
+                  'slot_id': widget.slotId,
                   'bounding_box': item['bounding_box'],
+                  'brand': item['brand'],
+                  'thumbnail_path': item['thumbnail_path'],
+                  'confidence': item['confidence'],
                   'is_chargeable_device': item['is_chargeable'] == true,
                   'charge_reminder_cycle_days': 90,
                 });
                 setState(() => _confirmedCount++);
+                if (mounted) context.read<AppState>().refreshSearchItems();
                 if (mounted) Navigator.pop(ctx);
               } catch (e) {
                 ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('$e')));

@@ -43,8 +43,11 @@ async def upload_image(
     # Create snapshot record in DB
     snapshot = await svc.create_snapshot(slot_id, filepath, task_id)
 
-    # Dispatch async AI recognition pipeline via Celery
-    process_upload.delay(task_id, filepath, slot_id)
+    # Use business task_id as Celery task id so /task-status can look up results
+    process_upload.apply_async(
+        args=[task_id, filepath, slot_id],
+        task_id=task_id,
+    )
 
     return schemas.UploadResponse(task_id=task_id, status="processing", slot_id=slot_id)
 
@@ -65,14 +68,18 @@ async def get_task_status(task_id: str, svc: ItemService = Depends(get_item_serv
                 status="completed",
                 items=items,
             )
-        else:
-            return schemas.TaskStatusResponse(
-                task_id=task_id,
-                status="failed",
-                error=str(result.info) if result.info else "Unknown error",
-            )
-    else:
-        return schemas.TaskStatusResponse(task_id=task_id, status="processing")
+        return schemas.TaskStatusResponse(
+            task_id=task_id,
+            status="failed",
+            error=str(result.info) if result.info else "Unknown error",
+        )
+
+    # Fallback: Celery still running or result expired — check DB snapshot
+    db_status = await svc.get_task_status_from_db(task_id)
+    if db_status:
+        return db_status
+
+    return schemas.TaskStatusResponse(task_id=task_id, status="processing")
 
 
 @router.put("/confirm/{item_id}", response_model=schemas.ItemResponse)

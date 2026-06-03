@@ -32,6 +32,35 @@ def _result_items(results: list[dict]) -> list[schemas.SearchResultItem]:
     ]
 
 
+@router.get("/recent", response_model=schemas.HybridSearchResponse)
+async def recent_items(
+    limit: int = 20,
+    location_id: str | None = None,
+    svc: SearchService = Depends(get_search_service),
+):
+    """Recently added/updated items for quick access below the search bar."""
+    rows = await svc.list_recent_items(limit=limit, location_id=location_id)
+    return schemas.HybridSearchResponse(
+        results=[
+            schemas.SearchResultItem(
+                item_label=r["item_label"],
+                breadcrumb=r.get("breadcrumb", ""),
+                slot_id=r.get("slot_id", ""),
+                score=1.0,
+            )
+            for r in rows
+        ],
+        total=len(rows),
+    )
+
+
+@router.post("/reindex")
+async def reindex_search(svc: SearchService = Depends(get_search_service)):
+    """Rebuild search index from database (run once after deploy)."""
+    count = await svc.reindex_all_items()
+    return {"status": "ok", "indexed": count}
+
+
 @router.post("/hybrid", response_model=schemas.HybridSearchResponse)
 async def hybrid_search(
     data: schemas.HybridSearchRequest,

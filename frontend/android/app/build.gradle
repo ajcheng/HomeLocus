@@ -18,8 +18,8 @@ android {
         applicationId "com.homelocus.homelocus"
         minSdk 33
         targetSdk 36
-        versionCode 7
-        versionName "0.1.7"
+        versionCode 11
+        versionName "0.1.11"
     }
     buildTypes {
         release {

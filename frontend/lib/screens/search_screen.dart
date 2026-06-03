@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../app/app_state.dart';
 import '../services/api_client.dart';
 
 class SearchScreen extends StatefulWidget {
@@ -12,17 +14,51 @@ class _SearchScreenState extends State<SearchScreen> {
   final _api = ApiClient();
   final _ctrl = TextEditingController();
   List<dynamic> _results = [];
+  List<dynamic> _recentItems = [];
   bool _loading = false;
+  bool _loadingRecent = false;
   bool _hasSearched = false;
   String? _error;
+  int _loadedListVersion = -1;
 
   final _suggestions = ['鼠标', '充电', '保暖', '发票', '工具', '药品', '冬季', '相机'];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadedListVersion = context.read<AppState>().searchListVersion;
+    _loadRecentItems();
+  }
+
+  Future<void> _loadRecentItems() async {
+    setState(() => _loadingRecent = true);
+    try {
+      final locId = context.read<AppState>().activeLocationId;
+      final path = locId.isNotEmpty
+          ? '/search/recent?limit=30&location_id=$locId'
+          : '/search/recent?limit=30';
+      final data = await _api.get(path);
+      if (mounted) {
+        setState(() {
+          _recentItems = (data['results'] as List?) ?? [];
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _recentItems = []);
+    }
+    if (mounted) setState(() => _loadingRecent = false);
+  }
 
   Future<void> _search(String text) async {
     if (text.isEmpty) return;
     setState(() { _loading = true; _error = null; _hasSearched = true; });
     try {
-      final data = await _api.post('/search/hybrid', body: {'text': text, 'limit': 20});
+      final locId = context.read<AppState>().activeLocationId;
+      final data = await _api.post('/search/hybrid', body: {
+        'text': text,
+        'limit': 20,
+        if (locId.isNotEmpty) 'location_id': locId,
+      });
       setState(() { _results = (data['results'] as List?) ?? []; });
     } catch (e) {
       setState(() { _error = '$e'; _results = []; });
@@ -32,9 +68,18 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final listVersion = context.watch<AppState>().searchListVersion;
+    if (listVersion != _loadedListVersion) {
+      _loadedListVersion = listVersion;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadRecentItems();
+      });
+    }
+
     return Scaffold(
       appBar: AppBar(title: const Text('检索')),
       body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
             padding: const EdgeInsets.all(16),
@@ -44,11 +89,38 @@ class _SearchScreenState extends State<SearchScreen> {
               onSubmitted: _search,
               leading: const Icon(Icons.search),
               trailing: [
-                IconButton(icon: const Icon(Icons.image), tooltip: '以图搜图', onPressed: () {}),
+                IconButton(icon: const Icon(Icons.refresh), tooltip: '刷新', onPressed: _loadRecentItems),
               ],
             ),
           ),
-          // Suggestions
+          // Recent items below search bar
+          if (_recentItems.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text('已添加的物品', style: Theme.of(context).textTheme.titleSmall),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _loadingRecent
+                  ? const LinearProgressIndicator()
+                  : Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: _recentItems.map((r) {
+                        final label = r['item_label'] ?? '';
+                        return ActionChip(
+                          avatar: const Icon(Icons.inventory_2, size: 18),
+                          label: Text(label, overflow: TextOverflow.ellipsis),
+                          onPressed: () {
+                            _ctrl.text = label;
+                            _search(label);
+                          },
+                        );
+                      }).toList(),
+                    ),
+            ),
+            const SizedBox(height: 8),
+          ],
           if (!_hasSearched)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),

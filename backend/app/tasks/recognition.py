@@ -11,6 +11,46 @@ from app.services.ai_recognition import ai_recognition
 logger = logging.getLogger(__name__)
 
 
+def _persist_task_result(task_id: str, items: list) -> None:
+    """Write recognition items to DB (sync — safe inside Celery fork worker)."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core.config import settings
+    from app.models.item import Item, ImageSnapshot
+
+    if not items:
+        return
+
+    try:
+        engine = create_engine(settings.database_url_sync)
+        Session = sessionmaker(bind=engine)
+        with Session() as session:
+            snapshot = session.query(ImageSnapshot).filter_by(task_id=task_id).first()
+            if not snapshot:
+                logger.warning(f"[{task_id}] Snapshot not found for DB persist")
+                return
+            snapshot.ai_response_raw = {"items": items}
+            for item_data in items:
+                kwargs = dict(
+                    slot_id=snapshot.slot_id,
+                    label=item_data.get("label", "unknown"),
+                    brand=item_data.get("brand"),
+                    tags=item_data.get("tags", []),
+                    bounding_box=item_data.get("bounding_box"),
+                    thumbnail_path=item_data.get("thumbnail_path"),
+                    confidence=item_data.get("confidence"),
+                    ai_label_raw=item_data.get("label"),
+                )
+                if item_data.get("id"):
+                    kwargs["id"] = item_data["id"]
+                session.add(Item(**kwargs))
+            session.commit()
+        logger.info(f"[{task_id}] Results persisted to database ({len(items)} items)")
+    except Exception as e:
+        logger.warning(f"[{task_id}] Failed to persist results to DB: {e}")
+
+
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def process_upload(self, task_id: str, filepath: str, slot_id: str):
     """
@@ -61,6 +101,8 @@ def process_upload(self, task_id: str, filepath: str, slot_id: str):
         result["items"] = vision_result.get("items", [])
         result["status"] = "completed"
         logger.info(f"[{task_id}] Pipeline completed: {len(result['items'])} items")
+
+        _persist_task_result(task_id, result["items"])
 
     except Exception as e:
         logger.error(f"[{task_id}] Pipeline failed: {e}")

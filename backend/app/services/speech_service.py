@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.models.space import Slot, Container, Zone, Location
 from app.models.item import Item
 from app.schemas.speech import ParsedItem, MatchedSlot
+from app.services.search_service import SearchService
 
 logger = logging.getLogger(__name__)
 
@@ -201,4 +202,5 @@ class SpeechService:
         self.db.add(item)
         await self.db.commit()
         await self.db.refresh(item)
+        await SearchService(self.db).index_item_record(item)
         return item

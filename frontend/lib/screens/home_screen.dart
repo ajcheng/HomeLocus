@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../app/app_state.dart';
 import 'space_screen.dart';
 import 'search_screen.dart';
 import 'reminders_screen.dart';
@@ -32,7 +34,15 @@ class _HomeScreenState extends State<HomeScreen> {
       body: _screens[_currentIndex],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
-        onDestinationSelected: (i) => setState(() => _currentIndex = i),
+        onDestinationSelected: (i) {
+          setState(() => _currentIndex = i);
+          if (i == 1) {
+            // Refresh recent items when opening search tab
+            try {
+              context.read<AppState>().refreshSearchItems();
+            } catch (_) {}
+          }
+        },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home), label: '空间'),
           NavigationDestination(icon: Icon(Icons.search), label: '搜索'),

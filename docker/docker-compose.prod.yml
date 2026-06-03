@@ -57,7 +57,7 @@ services:
       AI_API_KEY: ${AI_API_KEY:-}
       AI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com}
       AI_MODEL: ${AI_MODEL:-deepseek-chat}
-      AI_VISION_MODEL: ${AI_VISION_MODEL:-deepseek-chat}
+      AI_VISION_MODEL: ${AI_VISION_MODEL:-kimi-k2.5}
       JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
     volumes:
       - homelocus_uploads:/data/uploads
@@ -73,6 +73,7 @@ services:
     command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
     environment:
       DATABASE_URL: "postgresql+asyncpg://homelocus:homelocus@postgres:5432/homelocus"
+      DATABASE_URL_SYNC: "postgresql://homelocus:homelocus@postgres:5432/homelocus"
       REDIS_URL: "redis://redis:6379/0"
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       STORAGE_LOCAL_PATH: "/data/uploads"
@@ -83,7 +84,7 @@ services:
       AI_API_KEY: ${AI_API_KEY:-}
       AI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com}
       AI_MODEL: ${AI_MODEL:-deepseek-chat}
-      AI_VISION_MODEL: ${AI_VISION_MODEL:-deepseek-chat}
+      AI_VISION_MODEL: ${AI_VISION_MODEL:-kimi-k2.5}
       JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
     volumes:
       - homelocus_uploads:/data/uploads
@@ -99,6 +100,7 @@ services:
     command: celery -A app.tasks.celery_app beat --loglevel=info
     environment:
       DATABASE_URL: "postgresql+asyncpg://homelocus:homelocus@postgres:5432/homelocus"
+      DATABASE_URL_SYNC: "postgresql://homelocus:homelocus@postgres:5432/homelocus"
       REDIS_URL: "redis://redis:6379/0"
       QDRANT_URL: "http://qdrant:6333"
       MEILISEARCH_URL: "http://meilisearch:7700"
