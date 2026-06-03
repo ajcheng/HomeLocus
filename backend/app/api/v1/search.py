@@ -6,8 +6,6 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_user
-from app.models.user import User
 from app.schemas import search as schemas
 from app.services.search_service import SearchService
 from app.services.semantic_search import semantic_search
@@ -53,7 +51,6 @@ async def search_by_image(
     file: UploadFile = File(...),
     location_id: str | None = Form(None),
     limit: int = Form(default=20),
-    user: User = Depends(get_current_user),
     svc: SearchService = Depends(get_search_service),
 ):
     """
