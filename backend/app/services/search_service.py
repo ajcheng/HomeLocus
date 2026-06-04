@@ -92,7 +92,7 @@ class SearchService:
         location_id = await self._location_id_for_slot(item.slot_id)
         tags = item.tags if isinstance(item.tags, list) else []
         search_engine.index_text(
-            item.id, item.label, item.brand, tags, "", location_id
+            item.id, item.label, item.brand, tags, "", location_id, item.category
         )
 
     async def reindex_all_items(self) -> int:
@@ -117,6 +117,7 @@ class SearchService:
                 or_(
                     Item.label.ilike(pattern),
                     Item.brand.ilike(pattern),
+                    Item.category.ilike(pattern),
                     Item.ai_label_raw.ilike(pattern),
                 )
             )

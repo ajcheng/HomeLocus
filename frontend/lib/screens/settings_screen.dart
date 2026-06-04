@@ -132,7 +132,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Text('关于', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  const Text('HomeLocus v0.1.11'),
+                  const Text('HomeLocus v0.1.12'),
                   const SizedBox(height: 4),
                   const Text('家庭物品存放管理系统'),
                   const SizedBox(height: 8),

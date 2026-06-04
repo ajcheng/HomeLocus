@@ -82,6 +82,23 @@ async def get_task_status(task_id: str, svc: ItemService = Depends(get_item_serv
     return schemas.TaskStatusResponse(task_id=task_id, status="processing")
 
 
+@router.get("/slot/{slot_id}", response_model=list[schemas.ItemResponse])
+async def list_slot_items(slot_id: str, svc: ItemService = Depends(get_item_service)):
+    """List all items in a storage slot (for space browser)."""
+    items = await svc.get_slot_items(slot_id)
+    return [svc.item_to_response(i) for i in items]
+
+
+@router.post("/manual", response_model=schemas.ItemResponse, status_code=201)
+async def create_manual_item(
+    data: schemas.ManualItemCreate,
+    svc: ItemService = Depends(get_item_service),
+):
+    """Add an item without photo recognition."""
+    item = await svc.create_manual_item(data)
+    return svc.item_to_response(item)
+
+
 @router.put("/confirm/{item_id}", response_model=schemas.ItemResponse)
 async def confirm_item(
     item_id: str,
@@ -91,14 +108,7 @@ async def confirm_item(
     item = await svc.confirm_item(item_id, data)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    return schemas.ItemResponse(
-        id=item.id, slot_id=item.slot_id, label=item.label,
-        brand=item.brand, tags=item.tags or [],
-        thumbnail_path=item.thumbnail_path,
-        is_chargeable=item.is_chargeable, charge_cycle_days=item.charge_cycle_days,
-        is_borrowed=item.is_borrowed, borrower=item.borrower,
-        confidence=item.confidence, created_at=item.created_at,
-    )
+    return svc.item_to_response(item)
 
 
 @router.get("/history/{slot_id}", response_model=list[schemas.HistorySnapshotResponse])
@@ -110,14 +120,7 @@ async def get_slot_history(slot_id: str, svc: ItemService = Depends(get_item_ser
             original_path=s.original_path, compressed_path=s.compressed_path,
             is_current=s.is_current, created_at=s.created_at,
             items=[
-                schemas.ItemResponse(
-                    id=i.id, slot_id=i.slot_id, label=i.label,
-                    brand=i.brand, tags=i.tags or [],
-                    thumbnail_path=i.thumbnail_path,
-                    is_chargeable=i.is_chargeable,
-                    is_borrowed=i.is_borrowed,
-                    confidence=i.confidence, created_at=i.created_at,
-                )
+                svc.item_to_response(i)
                 for i in (s.items or [])
             ],
         )

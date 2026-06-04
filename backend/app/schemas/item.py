@@ -9,8 +9,18 @@ class ConfirmItemRequest(BaseModel):
     slot_id: str = Field(..., max_length=50)
     bounding_box: Optional[dict] = None
     brand: Optional[str] = None
+    category: Optional[str] = None
     thumbnail_path: Optional[str] = None
     confidence: Optional[float] = None
+    is_chargeable_device: bool = False
+    charge_reminder_cycle_days: int = 90
+
+
+class ManualItemCreate(BaseModel):
+    slot_id: str = Field(..., max_length=50)
+    label: str = Field(..., max_length=200)
+    brand: Optional[str] = None
+    category: Optional[str] = None
     is_chargeable_device: bool = False
     charge_reminder_cycle_days: int = 90
 
@@ -33,6 +43,7 @@ class ItemResponse(BaseModel):
     slot_id: str
     label: str
     brand: Optional[str] = None
+    category: Optional[str] = None
     tags: list = []
     thumbnail_path: Optional[str] = None
     is_chargeable: bool = False

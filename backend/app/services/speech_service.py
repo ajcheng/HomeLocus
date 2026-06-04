@@ -10,7 +10,9 @@ from app.core.config import settings
 from app.models.space import Slot, Container, Zone, Location
 from app.models.item import Item
 from app.schemas.speech import ParsedItem, MatchedSlot
+from app.schemas import reminder as reminder_schemas
 from app.services.search_service import SearchService
+from app.services.reminder_service import ReminderService
 
 logger = logging.getLogger(__name__)
 
@@ -197,10 +199,23 @@ class SpeechService:
         )
 
     async def add_item_from_speech(self, parsed: ParsedItem, slot_id: str) -> Item:
-        item = Item(slot_id=slot_id, label=parsed.label, brand=parsed.brand,
-                     tags=parsed.tags, is_chargeable=parsed.is_chargeable)
+        item = Item(
+            slot_id=slot_id,
+            label=parsed.label,
+            brand=parsed.brand,
+            category=parsed.category,
+            tags=parsed.tags,
+            is_chargeable=parsed.is_chargeable,
+        )
         self.db.add(item)
         await self.db.commit()
         await self.db.refresh(item)
         await SearchService(self.db).index_item_record(item)
+        if item.is_chargeable:
+            await ReminderService(self.db).complete_charge(
+                reminder_schemas.ChargeCompleteRequest(
+                    item_id=item.id,
+                    next_reminder_days=item.charge_cycle_days or 90,
+                )
+            )
         return item

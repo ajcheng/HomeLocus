@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../app/app_state.dart';
 import '../services/api_client.dart';
 
 class SpaceScreen extends StatefulWidget {
@@ -280,12 +282,10 @@ class _ZoneTileState extends State<_ZoneTile> {
                         children: [
                           if (c['slots'] != null)
                             for (final s in c['slots'] as List)
-                              ListTile(
-                                dense: true,
-                                leading: const Icon(Icons.grid_view, size: 16),
-                                title: Text(s['name'] ?? '', style: const TextStyle(fontSize: 13)),
-                                subtitle: Text('层级 ${s['level'] ?? 0}', style: const TextStyle(fontSize: 11)),
-                              ),
+                              _SlotItemsTile(slot: s, api: widget.api, onChanged: () {
+                                setState(() => _containers = null);
+                                _loadContainers();
+                              }),
                           ListTile(
                             dense: true,
                             leading: const Icon(Icons.add, color: Colors.green, size: 16),
@@ -303,6 +303,152 @@ class _ZoneTileState extends State<_ZoneTile> {
               onTap: _addContainer,
             ),
             const SizedBox(height: 4),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---- Slot with items list ----
+class _SlotItemsTile extends StatefulWidget {
+  final dynamic slot;
+  final ApiClient api;
+  final VoidCallback onChanged;
+
+  const _SlotItemsTile({required this.slot, required this.api, required this.onChanged});
+
+  @override
+  State<_SlotItemsTile> createState() => _SlotItemsTileState();
+}
+
+class _SlotItemsTileState extends State<_SlotItemsTile> {
+  List<dynamic>? _items;
+  bool _loading = false;
+
+  Future<void> _loadItems() async {
+    if (_items != null || _loading) return;
+    setState(() => _loading = true);
+    try {
+      final data = await widget.api.get('/items/slot/${widget.slot['id']}');
+      setState(() { _items = data is List ? data : []; });
+    } catch (_) {
+      setState(() => _items = []);
+    }
+    setState(() => _loading = false);
+  }
+
+  Future<void> _addManualItem() async {
+    final labelCtrl = TextEditingController();
+    final brandCtrl = TextEditingController();
+    final categoryCtrl = TextEditingController();
+    var chargeable = false;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: Text('添加物品到「${widget.slot['name']}」'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: labelCtrl, decoration: const InputDecoration(labelText: '物品名称 *')),
+                TextField(controller: brandCtrl, decoration: const InputDecoration(labelText: '品牌')),
+                TextField(controller: categoryCtrl, decoration: const InputDecoration(labelText: '分类', hintText: 'electronics / clothing')),
+                CheckboxListTile(
+                  value: chargeable,
+                  title: const Text('需充电设备'),
+                  onChanged: (v) => setDlg(() => chargeable = v == true),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, labelCtrl.text.trim().isNotEmpty),
+              child: const Text('添加'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (ok != true) return;
+    try {
+      await widget.api.post('/items/manual', body: {
+        'slot_id': widget.slot['id'],
+        'label': labelCtrl.text.trim(),
+        if (brandCtrl.text.trim().isNotEmpty) 'brand': brandCtrl.text.trim(),
+        if (categoryCtrl.text.trim().isNotEmpty) 'category': categoryCtrl.text.trim(),
+        'is_chargeable_device': chargeable,
+        'charge_reminder_cycle_days': 90,
+      });
+      if (mounted) {
+        context.read<AppState>().refreshSearchItems();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('物品已添加')));
+      }
+      setState(() => _items = null);
+      await _loadItems();
+      widget.onChanged();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final itemCount = _items?.length;
+    return Padding(
+      padding: const EdgeInsets.only(left: 8, right: 4),
+      child: Card(
+        margin: EdgeInsets.zero,
+        color: Colors.grey.shade50,
+        child: ExpansionTile(
+          dense: true,
+          leading: const Icon(Icons.grid_view, size: 16),
+          title: Text(widget.slot['name'] ?? '', style: const TextStyle(fontSize: 13)),
+          subtitle: Text(
+            _loading
+                ? '加载中...'
+                : itemCount != null
+                    ? '层级 ${widget.slot['level'] ?? 0} · $itemCount 件物品'
+                    : '层级 ${widget.slot['level'] ?? 0}',
+            style: const TextStyle(fontSize: 11),
+          ),
+          onExpansionChanged: (exp) {
+            if (exp) _loadItems();
+          },
+          children: [
+            if (_loading)
+              const Padding(padding: EdgeInsets.all(8), child: LinearProgressIndicator())
+            else if (_items != null && _items!.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(8),
+                child: Text('暂无物品', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              )
+            else if (_items != null)
+              for (final it in _items!)
+                ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.inventory_2, size: 16, color: Colors.blue),
+                  title: Text(it['label'] ?? '', style: const TextStyle(fontSize: 13)),
+                  subtitle: Text(
+                    [
+                      if (it['category'] != null) it['category'],
+                      if (it['brand'] != null) '品牌: ${it['brand']}',
+                      if (it['is_chargeable'] == true) '需充电',
+                    ].join(' · '),
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.add_circle_outline, color: Colors.green, size: 18),
+              title: const Text('手动添加物品', style: TextStyle(fontSize: 13)),
+              onTap: _addManualItem,
+            ),
           ],
         ),
       ),

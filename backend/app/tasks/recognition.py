@@ -41,6 +41,7 @@ def _persist_task_result(task_id: str, items: list) -> None:
                     thumbnail_path=item_data.get("thumbnail_path"),
                     confidence=item_data.get("confidence"),
                     ai_label_raw=item_data.get("label"),
+                    category=item_data.get("category"),
                 )
                 if item_data.get("id"):
                     kwargs["id"] = item_data["id"]

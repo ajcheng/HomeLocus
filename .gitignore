@@ -37,3 +37,6 @@ frontend/.packages
 frontend/.flutter-plugins*
 *.apk
 backend/static/
+
+# TMP
+tmp/

@@ -16,6 +16,7 @@ class Item(Base):
     slot_id: Mapped[str] = mapped_column(String(50), ForeignKey("slots.id"), nullable=False)
     label: Mapped[str] = mapped_column(String(200), nullable=False)
     brand: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     tags: Mapped[Optional[list]] = mapped_column(JSONB, default=list)
 
     # Bounding box in source image

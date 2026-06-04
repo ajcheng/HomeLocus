@@ -39,14 +39,26 @@ class SearchEngine:
         except meilisearch.errors.MeilisearchApiError:
             self.meili.create_index("items", {"primaryKey": "id"})
             self.meili.index("items").update_filterable_attributes(["location_id", "labels"])
-            self.meili.index("items").update_searchable_attributes(["label", "brand", "tags", "ocr_text"])
+            self.meili.index("items").update_searchable_attributes(
+                ["label", "brand", "category", "tags", "ocr_text"]
+            )
 
-    def index_text(self, item_id: str, label: str, brand: str | None, tags: list[str], ocr_text: str, location_id: str):
+    def index_text(
+        self,
+        item_id: str,
+        label: str,
+        brand: str | None,
+        tags: list[str],
+        ocr_text: str,
+        location_id: str,
+        category: str | None = None,
+    ):
         """Index an item's text metadata in Meilisearch."""
         doc = {
             "id": item_id,
             "label": label,
             "brand": brand or "",
+            "category": category or "",
             "tags": tags or [],
             "ocr_text": ocr_text,
             "location_id": location_id,

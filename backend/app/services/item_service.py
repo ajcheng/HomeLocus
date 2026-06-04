@@ -8,7 +8,9 @@ from sqlalchemy.orm import selectinload
 from app.models.item import Item, ImageSnapshot
 from app.models.space import Slot
 from app.schemas import item as schemas
+from app.schemas import reminder as reminder_schemas
 from app.services.search_service import SearchService
+from app.services.reminder_service import ReminderService
 
 
 class ItemService:
@@ -66,6 +68,7 @@ class ItemService:
                 thumbnail_path=item_data.get("thumbnail_path"),
                 confidence=item_data.get("confidence"),
                 ai_label_raw=item_data.get("label"),
+                category=item_data.get("category"),
             )
             if item_data.get("id"):
                 item_kwargs["id"] = item_data["id"]
@@ -77,12 +80,12 @@ class ItemService:
     async def confirm_item(self, item_id: str, data: schemas.ConfirmItemRequest) -> Item | None:
         item = await self.db.get(Item, item_id)
         if not item:
-            # Recognition items may exist only in Celery result if DB persist failed
             item = Item(
                 id=item_id,
                 slot_id=data.slot_id,
                 label=data.confirmed_label,
                 brand=data.brand,
+                category=data.category,
                 bounding_box=data.bounding_box,
                 thumbnail_path=data.thumbnail_path,
                 confidence=data.confidence,
@@ -97,6 +100,8 @@ class ItemService:
                 item.bounding_box = data.bounding_box
             if data.brand is not None:
                 item.brand = data.brand
+            if data.category is not None:
+                item.category = data.category
             if data.thumbnail_path is not None:
                 item.thumbnail_path = data.thumbnail_path
             if data.confidence is not None:
@@ -106,14 +111,62 @@ class ItemService:
         await self.db.commit()
         await self.db.refresh(item)
         await SearchService(self.db).index_item_record(item)
+        if item.is_chargeable:
+            await ReminderService(self.db).complete_charge(
+                reminder_schemas.ChargeCompleteRequest(
+                    item_id=item.id,
+                    next_reminder_days=item.charge_cycle_days or 90,
+                )
+            )
         return item
 
-    async def get_slot_items(self, slot_id: str, current_only: bool = True) -> list[Item]:
-        stmt = select(Item).where(Item.slot_id == slot_id)
-        if current_only:
-            stmt = stmt.where(Item.snapshot_id == None)
-        result = await self.db.execute(stmt.order_by(Item.created_at.desc()))
+    async def create_manual_item(self, data: schemas.ManualItemCreate) -> Item:
+        item = Item(
+            slot_id=data.slot_id,
+            label=data.label,
+            brand=data.brand,
+            category=data.category,
+            is_chargeable=data.is_chargeable_device,
+            charge_cycle_days=data.charge_reminder_cycle_days,
+        )
+        self.db.add(item)
+        await self.db.commit()
+        await self.db.refresh(item)
+        await SearchService(self.db).index_item_record(item)
+        if item.is_chargeable:
+            await ReminderService(self.db).complete_charge(
+                reminder_schemas.ChargeCompleteRequest(
+                    item_id=item.id,
+                    next_reminder_days=item.charge_cycle_days or 90,
+                )
+            )
+        return item
+
+    async def get_slot_items(self, slot_id: str) -> list[Item]:
+        stmt = (
+            select(Item)
+            .where(Item.slot_id == slot_id)
+            .order_by(Item.updated_at.desc())
+        )
+        result = await self.db.execute(stmt)
         return list(result.scalars().all())
+
+    def item_to_response(self, item: Item) -> schemas.ItemResponse:
+        return schemas.ItemResponse(
+            id=item.id,
+            slot_id=item.slot_id,
+            label=item.label,
+            brand=item.brand,
+            category=item.category,
+            tags=item.tags or [],
+            thumbnail_path=item.thumbnail_path,
+            is_chargeable=item.is_chargeable,
+            charge_cycle_days=item.charge_cycle_days,
+            is_borrowed=item.is_borrowed,
+            borrower=item.borrower,
+            confidence=item.confidence,
+            created_at=item.created_at,
+        )
 
     async def get_slot_history(self, slot_id: str) -> list[ImageSnapshot]:
         stmt = (

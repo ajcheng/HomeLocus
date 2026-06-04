@@ -87,6 +87,7 @@ class _RecognitionResultScreenState extends State<RecognitionResultScreen> {
                   'slot_id': widget.slotId,
                   'bounding_box': item['bounding_box'],
                   'brand': item['brand'],
+                  'category': item['category'],
                   'thumbnail_path': item['thumbnail_path'],
                   'confidence': item['confidence'],
                   'is_chargeable_device': item['is_chargeable'] == true,
