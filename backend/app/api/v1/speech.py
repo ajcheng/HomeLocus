@@ -20,7 +20,7 @@ def get_speech_service(db: AsyncSession = Depends(get_db)) -> SpeechService:
 @router.post("/add-item", response_model=schemas.SpeechAddItemResponse)
 async def speech_add_item(
     audio: UploadFile = File(...),
-    location_id: str = Form(...),
+    location_id: str = Form(default=""),
     svc: SpeechService = Depends(get_speech_service),
 ):
     # Save uploaded audio to temp file

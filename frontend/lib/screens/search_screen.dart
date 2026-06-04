@@ -17,6 +17,8 @@ class _SearchScreenState extends State<SearchScreen> {
   final _ctrl = TextEditingController();
   List<dynamic> _results = [];
   List<dynamic> _recentItems = [];
+  List<String> _categories = [];
+  String? _selectedCategory;
   bool _loading = false;
   bool _loadingRecent = false;
   bool _hasSearched = false;
@@ -30,6 +32,22 @@ class _SearchScreenState extends State<SearchScreen> {
     super.initState();
     _loadedListVersion = context.read<AppState>().searchListVersion;
     _loadRecentItems();
+    _loadCategories();
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final locId = context.read<AppState>().activeLocationId;
+      final path = locId.isNotEmpty
+          ? '/search/categories?location_id=$locId'
+          : '/search/categories';
+      final data = await _api.get(path);
+      if (mounted) {
+        setState(() {
+          _categories = List<String>.from(data['categories'] ?? []);
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadRecentItems() async {
@@ -89,6 +107,7 @@ class _SearchScreenState extends State<SearchScreen> {
         'text': text,
         'limit': 20,
         if (locId.isNotEmpty) 'location_id': locId,
+        if (_selectedCategory != null && _selectedCategory!.isNotEmpty) 'category': _selectedCategory,
       });
       setState(() { _results = (data['results'] as List?) ?? []; });
     } catch (e) {
@@ -103,7 +122,10 @@ class _SearchScreenState extends State<SearchScreen> {
     if (listVersion != _loadedListVersion) {
       _loadedListVersion = listVersion;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _loadRecentItems();
+        if (mounted) {
+          _loadRecentItems();
+          _loadCategories();
+        }
       });
     }
 
@@ -125,6 +147,37 @@ class _SearchScreenState extends State<SearchScreen> {
               ],
             ),
           ),
+          if (_categories.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    FilterChip(
+                      label: const Text('全部分类'),
+                      selected: _selectedCategory == null,
+                      onSelected: (_) {
+                        setState(() => _selectedCategory = null);
+                        if (_hasSearched && _ctrl.text.isNotEmpty) _search(_ctrl.text);
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    ..._categories.map((c) => Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: FilterChip(
+                        label: Text(c),
+                        selected: _selectedCategory == c,
+                        onSelected: (sel) {
+                          setState(() => _selectedCategory = sel ? c : null);
+                          if (_hasSearched && _ctrl.text.isNotEmpty) _search(_ctrl.text);
+                        },
+                      ),
+                    )),
+                  ],
+                ),
+              ),
+            ),
           // Recent items below search bar
           if (_recentItems.isNotEmpty) ...[
             Padding(

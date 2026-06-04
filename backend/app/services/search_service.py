@@ -1,6 +1,6 @@
 from typing import Optional
 
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -20,14 +20,17 @@ class SearchService:
         text: Optional[str] = None,
         vector: Optional[list[float]] = None,
         location_id: Optional[str] = None,
+        category: Optional[str] = None,
         limit: int = 20,
     ) -> list[dict]:
         # Meilisearch text search (vector optional)
-        hits = search_engine.hybrid_search(text=text, vector=vector, location_id=location_id, limit=limit)
+        hits = search_engine.hybrid_search(
+            text=text, vector=vector, location_id=location_id, category=category, limit=limit
+        )
 
         # Fallback to DB when index empty or Meilisearch unavailable
         if text and len(hits) < limit:
-            db_hits = await self._search_db(text, location_id, limit)
+            db_hits = await self._search_db(text, location_id, category, limit)
             seen = {h["id"] for h in hits}
             for h in db_hits:
                 if h["id"] not in seen:
@@ -103,8 +106,20 @@ class SearchService:
             await self.index_item_record(item)
         return len(items)
 
+    async def list_categories(self, location_id: str | None = None) -> list[str]:
+        stmt = select(distinct(Item.category)).where(Item.category.isnot(None), Item.category != "")
+        if location_id:
+            stmt = (
+                stmt.join(Slot, Item.slot_id == Slot.id)
+                .join(Container, Slot.container_id == Container.id)
+                .join(Zone, Container.zone_id == Zone.id)
+                .where(Zone.location_id == location_id)
+            )
+        result = await self.db.execute(stmt.order_by(Item.category))
+        return [row[0] for row in result.all() if row[0]]
+
     async def _search_db(
-        self, text: str, location_id: str | None, limit: int
+        self, text: str, location_id: str | None, category: str | None, limit: int
     ) -> list[dict]:
         pattern = f"%{text}%"
         stmt = (
@@ -124,6 +139,8 @@ class SearchService:
         )
         if location_id:
             stmt = stmt.where(Location.id == location_id)
+        if category:
+            stmt = stmt.where(Item.category == category)
         stmt = stmt.order_by(Item.updated_at.desc()).limit(limit)
         result = await self.db.execute(stmt)
         rows = result.all()

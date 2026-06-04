@@ -1,6 +1,11 @@
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
+import 'package:record/record.dart';
+
 import '../app/app_state.dart';
 import '../services/api_client.dart';
 
@@ -14,6 +19,7 @@ class VoiceInputScreen extends StatefulWidget {
 
 class _VoiceInputScreenState extends State<VoiceInputScreen> {
   final _api = ApiClient();
+  final _recorder = AudioRecorder();
   final _textCtrl = TextEditingController();
   final _textFocus = FocusNode();
   bool _isRecording = false;
@@ -24,9 +30,14 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
   int _recordSeconds = 0;
   Timer? _timer;
   String _statusText = '点击麦克风开始语音输入';
+  String? _audioPath;
 
-  bool get _canSubmit =>
-      !_loading && _textCtrl.text.trim().isNotEmpty;
+  bool get _canSubmit => !_loading && _textCtrl.text.trim().isNotEmpty;
+
+  String get _effectiveLocationId {
+    if (widget.locationId.isNotEmpty) return widget.locationId;
+    return context.read<AppState>().activeLocationId;
+  }
 
   @override
   void initState() {
@@ -37,6 +48,7 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _recorder.dispose();
     _textCtrl.dispose();
     _textFocus.dispose();
     super.dispose();
@@ -44,44 +56,96 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
 
   Future<void> _toggleRecording() async {
     if (_isRecording) {
-      _timer?.cancel();
-      setState(() {
-        _isRecording = false;
-        _recordCompleted = true;
-        _statusText = '录音完成，$_recordSeconds 秒';
-      });
-
-      if (_textCtrl.text.trim().isNotEmpty) {
-        await _processText(_textCtrl.text.trim());
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('录音已结束。请在下方输入物品描述（如：主卧大衣柜第二层放了鼠标），再点「智能识别并添加」'),
-            duration: Duration(seconds: 4),
-          ),
-        );
-        _textFocus.requestFocus();
-      }
+      await _stopRecording();
     } else {
-      setState(() {
-        _isRecording = true;
-        _recordCompleted = false;
-        _recordSeconds = 0;
-        _statusText = '正在录音... 请说出物品信息';
-        _error = null;
-        _result = null;
-      });
-
-      _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-        setState(() => _recordSeconds++);
-      });
-
-      Future.delayed(const Duration(seconds: 10), () {
-        if (_isRecording && mounted) {
-          _toggleRecording();
-        }
-      });
+      await _startRecording();
     }
+  }
+
+  Future<void> _startRecording() async {
+    final hasPerm = await _recorder.hasPermission();
+    if (!hasPerm) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('需要麦克风权限，请在系统设置中允许')),
+        );
+      }
+      return;
+    }
+
+    final dir = await getTemporaryDirectory();
+    _audioPath = '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+    setState(() {
+      _isRecording = true;
+      _recordCompleted = false;
+      _recordSeconds = 0;
+      _statusText = '正在录音... 请说出物品信息';
+      _error = null;
+      _result = null;
+    });
+
+    await _recorder.start(
+      const RecordConfig(encoder: AudioEncoder.aacLc, sampleRate: 16000),
+      path: _audioPath!,
+    );
+
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _recordSeconds++);
+    });
+
+    Future.delayed(const Duration(seconds: 30), () {
+      if (_isRecording && mounted) _stopRecording();
+    });
+  }
+
+  Future<void> _stopRecording() async {
+    _timer?.cancel();
+    final path = await _recorder.stop();
+    final audioFile = path ?? _audioPath;
+
+    setState(() {
+      _isRecording = false;
+      _recordCompleted = true;
+      _statusText = '录音完成，$_recordSeconds 秒';
+    });
+
+    if (audioFile == null || !File(audioFile).existsSync()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('录音失败，请重试或改用文字输入')),
+        );
+      }
+      return;
+    }
+
+    await _uploadAudio(File(audioFile));
+  }
+
+  Future<void> _uploadAudio(File file) async {
+    final locId = _effectiveLocationId;
+    if (locId.isEmpty) {
+      setState(() => _error = '请先在「空间」页选择地点后再使用语音添加');
+      return;
+    }
+
+    setState(() { _loading = true; _error = null; _result = null; });
+    try {
+      final data = await _api.uploadAudio(
+        '/speech/add-item',
+        file,
+        fields: {'location_id': locId},
+        timeoutSeconds: 120,
+      );
+      final transcription = (data['transcription'] ?? '').toString();
+      if (transcription.isNotEmpty) {
+        _textCtrl.text = transcription;
+      }
+      await _handleSpeechResponse(data, transcription);
+    } catch (e) {
+      setState(() => _error = '$e'.split('\n').first);
+    }
+    setState(() => _loading = false);
   }
 
   Future<void> _processText(String text) async {
@@ -89,47 +153,57 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
     try {
       final data = await _api.post('/speech/add-item-text', body: {
         'text': text,
-        'location_id': widget.locationId.isNotEmpty ? widget.locationId : null,
+        'location_id': _effectiveLocationId.isNotEmpty ? _effectiveLocationId : null,
       });
-
-      if (data is Map && data['matched_slot'] != null) {
-        final slot = data['matched_slot'];
-        final parsed = data['parsed_item'];
-        setState(() {
-          _result = '物品: ${parsed?['label'] ?? text}\n位置: ${slot['breadcrumb'] ?? slot['slot_name'] ?? '未知'}';
-        });
-
-        final confirm = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('识别结果'),
-            content: Text(_result!),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-              FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确认添加')),
-            ],
-          ),
-        );
-
-        if (confirm == true && parsed != null && slot != null) {
-          await _api.post('/speech/add-item/confirm', body: {
-            'transcription': text,
-            'parsed_item': parsed,
-            'slot_id': slot['slot_id'],
-          });
-          if (mounted) {
-            context.read<AppState>().refreshSearchItems();
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('物品已添加')));
-            Navigator.pop(context);
-          }
-        }
-      } else {
-        setState(() => _error = '未能自动匹配位置。请尝试：\n"房间名+储物柜+层级+物品名"\n如："主卧大衣柜第二层放了鼠标"');
-      }
+      await _handleSpeechResponse(data, text);
     } catch (e) {
       setState(() => _error = '$e'.split('\n').first);
     }
     setState(() => _loading = false);
+  }
+
+  Future<void> _handleSpeechResponse(dynamic data, String fallbackText) async {
+    if (data is! Map) return;
+
+    if (data['matched_slot'] != null) {
+      final slot = data['matched_slot'];
+      final parsed = data['parsed_item'];
+      final transcription = (data['transcription'] ?? fallbackText).toString();
+      setState(() {
+        _result = '识别: $transcription\n物品: ${parsed?['label'] ?? fallbackText}\n位置: ${slot['breadcrumb'] ?? slot['slot_name'] ?? '未知'}';
+      });
+
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('识别结果'),
+          content: Text(_result!),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确认添加')),
+          ],
+        ),
+      );
+
+      if (confirm == true && parsed != null && slot != null) {
+        await _api.post('/speech/add-item/confirm', body: {
+          'transcription': transcription,
+          'parsed_item': parsed,
+          'slot_id': slot['slot_id'],
+        });
+        if (mounted) {
+          context.read<AppState>().refreshSearchItems();
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('物品已添加')));
+          Navigator.pop(context);
+        }
+      }
+    } else {
+      final hint = (data['transcription'] ?? fallbackText).toString();
+      if (hint.isNotEmpty && _textCtrl.text.isEmpty) {
+        _textCtrl.text = hint;
+      }
+      setState(() => _error = '未能自动匹配位置。请尝试：\n"房间名+储物柜+层级+物品名"\n如："主卧大衣柜第二层放了鼠标"');
+    }
   }
 
   @override
@@ -175,13 +249,13 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
                 ),
                 if (_isRecording) ...[
                   const SizedBox(height: 8),
-                  Text('点击麦克风停止录音', style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+                  Text('再次点击停止并识别', style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
                 ],
-                if (_recordCompleted && !_isRecording) ...[
+                if (_recordCompleted && !_isRecording && !_loading) ...[
                   const SizedBox(height: 8),
                   Text(
-                    '当前为模拟录音，请在下方文字框输入描述',
-                    style: TextStyle(color: Colors.orange.shade700, fontSize: 12),
+                    '录音已上传识别，也可在下方修改文字后重新提交',
+                    style: TextStyle(color: Colors.green.shade700, fontSize: 12),
                     textAlign: TextAlign.center,
                   ),
                 ],
@@ -194,10 +268,10 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
             focusNode: _textFocus,
             maxLines: 3,
             decoration: InputDecoration(
-              labelText: '输入物品描述（必填）',
+              labelText: '文字描述（可编辑）',
               hintText: '主卧大衣柜第二层有罗技鼠标和充电宝',
               border: const OutlineInputBorder(),
-              helperText: _recordCompleted ? '输入后即可点击「智能识别并添加」' : null,
+              helperText: _recordCompleted ? '可修改识别结果后重新提交' : null,
             ),
             enabled: !_loading,
             onSubmitted: _canSubmit ? (v) => _processText(v.trim()) : null,

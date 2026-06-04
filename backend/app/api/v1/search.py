@@ -54,6 +54,16 @@ async def recent_items(
     )
 
 
+@router.get("/categories")
+async def list_categories(
+    location_id: str | None = None,
+    svc: SearchService = Depends(get_search_service),
+):
+    """Distinct item categories for filter chips."""
+    cats = await svc.list_categories(location_id=location_id)
+    return {"categories": cats}
+
+
 @router.post("/reindex")
 async def reindex_search(svc: SearchService = Depends(get_search_service)):
     """Rebuild search index from database (run once after deploy)."""
@@ -71,7 +81,12 @@ async def hybrid_search(
         expanded = await semantic_search.expand_query(data.text)
         search_terms = " ".join(expanded)
 
-    results = await svc.search(text=search_terms, location_id=data.location_id, limit=data.limit)
+    results = await svc.search(
+        text=search_terms,
+        location_id=data.location_id,
+        category=data.category,
+        limit=data.limit,
+    )
     return schemas.HybridSearchResponse(results=_result_items(results), total=len(results))
 
 

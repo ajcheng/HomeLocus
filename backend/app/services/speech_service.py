@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 
 import httpx
 from sqlalchemy import select, or_
@@ -48,6 +49,41 @@ Rules:
 class SpeechService:
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def transcribe(self, audio_path: str) -> str:
+        """Speech-to-text via OpenAI-compatible Whisper API."""
+        if not settings.ai_api_key:
+            logger.warning("ASR skipped: AI_API_KEY not configured")
+            return ""
+
+        mime = "audio/wav"
+        if audio_path.endswith(".m4a"):
+            mime = "audio/mp4"
+        elif audio_path.endswith(".mp3"):
+            mime = "audio/mpeg"
+        elif audio_path.endswith(".ogg"):
+            mime = "audio/ogg"
+
+        try:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                with open(audio_path, "rb") as audio_file:
+                    response = await client.post(
+                        f"{settings.ai_base_url.rstrip('/')}/v1/audio/transcriptions",
+                        headers={"Authorization": f"Bearer {settings.ai_api_key}"},
+                        files={"file": (os.path.basename(audio_path), audio_file, mime)},
+                        data={"model": settings.asr_model, "language": "zh"},
+                    )
+                if response.status_code != 200:
+                    logger.error(f"ASR HTTP {response.status_code}: {response.text[:300]}")
+                    return ""
+                payload = response.json()
+                text = payload.get("text", "").strip()
+                if text:
+                    logger.info(f"ASR transcription: {text[:80]}...")
+                return text
+        except Exception as e:
+            logger.error(f"ASR failed: {e}")
+            return ""
 
     async def parse_item_from_text(self, text: str) -> ParsedItem:
         """Use AI to extract structured item info from natural language."""

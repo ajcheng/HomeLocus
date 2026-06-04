@@ -63,6 +63,21 @@ class ApiClient {
   }
 
   /// Multipart upload and parse JSON response (e.g. image search).
+  Future<dynamic> uploadAudio(
+    String path,
+    File audioFile, {
+    Map<String, String> fields = const {},
+    int timeoutSeconds = 120,
+  }) async {
+    final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl$path'));
+    request.files.add(await http.MultipartFile.fromPath('audio', audioFile.path));
+    request.fields.addAll(fields);
+    if (_token != null) request.headers['Authorization'] = 'Bearer $_token';
+    final streamed = await request.send();
+    final response = await http.Response.fromStream(streamed).timeout(Duration(seconds: timeoutSeconds));
+    return _handleResponse(response);
+  }
+
   Future<dynamic> uploadMultipart(
     String path,
     File file, {

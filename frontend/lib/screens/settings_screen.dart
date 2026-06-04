@@ -12,7 +12,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _serverCtrl = TextEditingController(text: ApiClient.baseUrl);
   final _apiKeyCtrl = TextEditingController();
   final _modelCtrl = TextEditingController(text: 'deepseek-chat');
+  final _fcmTokenCtrl = TextEditingController();
   String _provider = 'deepseek';
+  bool _registeringPush = false;
 
   @override
   void initState() {
@@ -25,6 +27,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _serverCtrl.text = ApiClient.baseUrl;
     });
+  }
+
+  Future<void> _registerPushToken() async {
+    final token = _fcmTokenCtrl.text.trim();
+    if (token.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先填写 FCM 设备 Token')),
+      );
+      return;
+    }
+    setState(() => _registeringPush = true);
+    try {
+      await ApiClient().post('/notifications/device-token', body: {
+        'token': token,
+        'platform': 'android',
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('推送 Token 已注册')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+    setState(() => _registeringPush = false);
   }
 
   Future<void> _save() async {
@@ -109,6 +138,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ),
+          const SizedBox(height: 16),
+
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('推送通知', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '配置 FCM_SERVER_KEY 后，在 Firebase 控制台获取设备 Token 并注册，即可接收充电/借出提醒。',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _fcmTokenCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'FCM 设备 Token',
+                      hintText: '从 Firebase 或调试工具获取',
+                      prefixIcon: Icon(Icons.notifications_active),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.tonalIcon(
+                    onPressed: _registeringPush ? null : _registerPushToken,
+                    icon: _registeringPush
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.app_registration),
+                    label: const Text('注册推送 Token'),
+                  ),
+                ],
+              ),
+            ),
+          ),
           const SizedBox(height: 24),
 
           // Save
@@ -132,7 +196,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Text('关于', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  const Text('HomeLocus v0.1.12'),
+                  const Text('HomeLocus v0.1.13'),
                   const SizedBox(height: 4),
                   const Text('家庭物品存放管理系统'),
                   const SizedBox(height: 8),

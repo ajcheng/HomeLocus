@@ -7,6 +7,7 @@ class HybridSearchRequest(BaseModel):
     text: Optional[str] = None
     image_file: Optional[str] = None
     location_id: Optional[str] = None
+    category: Optional[str] = None
     limit: int = Field(default=20, ge=1, le=100)
 
 

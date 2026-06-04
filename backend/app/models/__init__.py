@@ -5,6 +5,7 @@ from app.models.user import User
 from app.models.family import Family, FamilyMember, Invitation
 from app.models.audit_log import AuditLog
 from app.models.floor_plan import FloorPlan, PlanAnchor
+from app.models.device_token import DevicePushToken
 from app.core.database import Base
 
 __all__ = [

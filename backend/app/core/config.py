@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     ai_base_url: str = "https://api.deepseek.com"
     ai_model: str = "deepseek-chat"
     ai_vision_model: str = "deepseek-chat"  # Model with vision support
+    asr_model: str = "whisper-1"
+
+    # FCM (Firebase Cloud Messaging legacy server key)
+    fcm_server_key: str = ""
 
     # Auth
     jwt_secret: str = "homelocus-dev-secret-change-in-production"

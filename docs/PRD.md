@@ -52,7 +52,7 @@
 | **按层级浏览物品** | P0 | ✅ **本次完成** | `GET /items/slot/{id}` + App 展开显示 |
 | 拍照 + AI 识别 | P0 | ✅ 可用 | FlowBar/kimi 视觉；约 60–100s；需配置 `AI_API_KEY` |
 | OCR | P0 | ❌ 未启用 | PaddleOCR 未配置 |
-| 语音录入 | P0 | ⚠️ 部分 | 文本 NLP 可用；**录音为模拟**，无 ASR |
+| 语音录入 | P0 | ✅ 基本完成 | 真实录音 + Whisper ASR；文本 NLP 备用 |
 | **手动录入** | P0 | ✅ **本次完成** | `POST /items/manual` + 空间页入口 |
 | 确认 + 索引 | P0 | ✅ | 确认后写 Meilisearch；DB 回退搜索 |
 | **category 分类** | P0 | ✅ **本次完成** | DB 字段 + 搜索索引 |
@@ -111,7 +111,7 @@
 | 按层级浏览物品 | ✅ `GET /api/v1/items/slot/{slot_id}` |
 | 拼音匹配 | ❌ |
 | 以图搜图 App | ✅ 搜索栏图片按钮 |
-| 按分类筛选 UI | ❌（category 已可搜） |
+| 按分类筛选 UI | ✅ 搜索页分类 FilterChip |
 | 搜索跳转空间 | ✅ 结果/最近物品点击 → 空间 Tab 展开层级 |
 
 ---
@@ -124,7 +124,7 @@
 | 确认后自动排期 | ✅ **本次完成** |
 | 已充电顺延 | ✅ `POST /reminders/charge/complete` |
 | App 提醒列表 | ✅ 提醒 Tab |
-| 推送通知 | ❌ 仅日志，待 FCM |
+| 推送通知 | ⚠️ 部分 | FCM 后端 + Token 注册；需配置 `FCM_SERVER_KEY` |
 | 借出标记入口 | ✅ 空间页长按物品 |
 | 24h 未处理再提醒 | ❌ |
 
@@ -171,6 +171,8 @@
 | POST | `/api/v1/search/hybrid` | 混合检索 |
 | GET | `/api/v1/search/recent` | 最近物品 |
 | POST | `/api/v1/search/by-image` | 以图搜图（后端） |
+| GET | `/api/v1/search/categories` | 分类列表（筛选） |
+| POST | `/api/v1/notifications/device-token` | 注册 FCM 设备 Token |
 | POST | `/api/v1/search/reindex` | 重建索引 |
 
 ### 5.4 语音
@@ -242,13 +244,12 @@
 ## 10. 待办优先级（研发 backlog）
 
 ### P0（下一迭代）
-1. FCM 推送 + 提醒触达用户
-2. 真实语音 ASR（接 `/speech/add-item`）
+1. App 集成 `firebase_messaging` 自动获取 FCM Token
+2. 配置生产环境 `FCM_SERVER_KEY`
 
 ### P1
 3. PaddleOCR
-4. 按分类筛选 UI
-5. 24h 未处理再提醒
+4. 24h 未处理再提醒
 
 ### P2
 9. 向量检索（CLIP embedding）

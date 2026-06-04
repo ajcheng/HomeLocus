@@ -38,7 +38,7 @@ class SearchEngine:
             self.meili.get_index("items")
         except meilisearch.errors.MeilisearchApiError:
             self.meili.create_index("items", {"primaryKey": "id"})
-            self.meili.index("items").update_filterable_attributes(["location_id", "labels"])
+            self.meili.index("items").update_filterable_attributes(["location_id", "category", "labels"])
             self.meili.index("items").update_searchable_attributes(
                 ["label", "brand", "category", "tags", "ocr_text"]
             )
@@ -68,12 +68,23 @@ class SearchEngine:
         except Exception as e:
             logger.error(f"Meilisearch index failed for {item_id}: {e}")
 
-    def search_text(self, query: str, location_id: str | None = None, limit: int = 20) -> list[dict]:
-        """Full-text search with optional location filter."""
+    def search_text(
+        self,
+        query: str,
+        location_id: str | None = None,
+        category: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Full-text search with optional location/category filter."""
         try:
             opt_params = {"limit": limit}
+            filters = []
             if location_id:
-                opt_params["filter"] = f'location_id = "{location_id}"'
+                filters.append(f'location_id = "{location_id}"')
+            if category:
+                filters.append(f'category = "{category}"')
+            if filters:
+                opt_params["filter"] = " AND ".join(filters)
             result = self.meili.index("items").search(query, opt_params)
             return [
                 {"id": h["id"], "label": h.get("label", ""), "score": 1.0 - (i * 0.02)}
@@ -139,10 +150,11 @@ class SearchEngine:
         text: str | None = None,
         vector: list[float] | None = None,
         location_id: str | None = None,
+        category: str | None = None,
         limit: int = 20,
     ) -> list[dict]:
         """Combine text and vector search with RRF fusion."""
-        text_results = self.search_text(text, location_id, limit) if text else []
+        text_results = self.search_text(text, location_id, category, limit) if text else []
         vector_results = self.search_vector(vector, location_id, limit) if vector else []
 
         if not text_results and not vector_results:
