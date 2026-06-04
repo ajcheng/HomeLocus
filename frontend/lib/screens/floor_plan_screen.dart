@@ -193,7 +193,10 @@ class _FloorPlanScreenState extends State<FloorPlanScreen> {
                                 ),
                               ListTile(
                                 title: Text('平面图 ${i + 1}'),
-                                subtitle: Text('${anchors.length} 个分区标注 · 长按删除'),
+                                subtitle: Text(
+                                  '${anchors.length} 个分区标注 · '
+                                  '${anchors.fold<int>(0, (s, a) => s + ((a['item_count'] as int?) ?? 0))} 件物品 · 长按删除',
+                                ),
                                 trailing: const Icon(Icons.chevron_right),
                               ),
                             ],
@@ -564,7 +567,11 @@ class _FloorPlanDetailScreenState extends State<FloorPlanDetailScreen> {
                               backgroundColor: _parseColor(a['color']),
                               radius: 8,
                             ),
-                            label: Text(a['label'] ?? '区域'),
+                            label: Text(
+                            (a['item_count'] ?? 0) > 0
+                                ? '${a['label']} · ${a['item_count']}件'
+                                : (a['label'] ?? '区域'),
+                          ),
                             onPressed: () => _openZone(a),
                           ),
                         );
@@ -649,10 +656,12 @@ class _AnchorPainter extends CustomPainter {
 
     final label = anchor['label']?.toString() ?? '';
     if (label.isEmpty) return;
+    final count = anchor['item_count'] ?? 0;
+    final text = count > 0 ? '$label ($count件)' : label;
 
     final tp = TextPainter(
       text: TextSpan(
-        text: label,
+        text: text,
         style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
       ),
       textDirection: ui.TextDirection.ltr,

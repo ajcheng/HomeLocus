@@ -44,7 +44,6 @@ def _persist_task_result(task_id: str, items: list, ocr_text: str = "") -> None:
                     confidence=item_data.get("confidence"),
                     ai_label_raw=item_data.get("label"),
                     category=item_data.get("category"),
-                    ocr_text=ocr_text or None,
                 )
                 if item_data.get("id"):
                     kwargs["id"] = item_data["id"]

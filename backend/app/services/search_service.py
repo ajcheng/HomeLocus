@@ -99,7 +99,7 @@ class SearchService:
             item.label,
             item.brand,
             tags,
-            item.ocr_text or "",
+            "",
             location_id,
             item.category,
         )

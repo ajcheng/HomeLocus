@@ -12,6 +12,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.floor_plan import FloorPlan, PlanAnchor
+from app.services.floor_plan_service import FloorPlanService
 from app.services.storage_service import storage_service
 
 router = APIRouter()
@@ -37,8 +38,25 @@ class AnchorResponse(BaseModel):
     polygon_points: list[dict]
     label: Optional[str] = None
     color: str
+    item_count: int = 0
 
     model_config = {"from_attributes": True}
+
+
+def get_floor_plan_service(db: AsyncSession = Depends(get_db)) -> FloorPlanService:
+    return FloorPlanService(db)
+
+
+def _anchor_response(anchor: PlanAnchor, counts: dict[str, int]) -> AnchorResponse:
+    zid = anchor.zone_id or ""
+    return AnchorResponse(
+        id=anchor.id,
+        zone_id=anchor.zone_id,
+        polygon_points=anchor.polygon_points,
+        label=anchor.label,
+        color=anchor.color,
+        item_count=counts.get(zid, 0) if zid else 0,
+    )
 
 
 class FloorPlanResponse(BaseModel):
@@ -90,6 +108,7 @@ async def list_floor_plans(
     location_id: str,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    fp_svc: FloorPlanService = Depends(get_floor_plan_service),
 ):
     result = await db.execute(
         select(FloorPlan)
@@ -98,15 +117,13 @@ async def list_floor_plans(
         .order_by(FloorPlan.created_at.desc())
     )
     plans = result.scalars().all()
+    counts = await fp_svc.zone_item_counts(location_id)
     return [
         FloorPlanResponse(
             id=p.id, location_id=p.location_id,
             image_url=storage_service.get_presigned_url(p.image_path),
             real_width_mm=p.real_width_mm, real_height_mm=p.real_height_mm,
-            anchors=[AnchorResponse(
-                id=a.id, zone_id=a.zone_id, polygon_points=a.polygon_points,
-                label=a.label, color=a.color,
-            ) for a in (p.anchors or [])],
+            anchors=[_anchor_response(a, counts) for a in (p.anchors or [])],
         )
         for p in plans
     ]
@@ -133,10 +150,9 @@ async def add_anchor(
     db.add(anchor)
     await db.commit()
     await db.refresh(anchor)
-    return AnchorResponse(
-        id=anchor.id, zone_id=anchor.zone_id,
-        polygon_points=anchor.polygon_points, label=anchor.label, color=anchor.color,
-    )
+    fp = await db.get(FloorPlan, floor_plan_id)
+    counts = await FloorPlanService(db).zone_item_counts(fp.location_id) if fp else {}
+    return _anchor_response(anchor, counts)
 
 
 @router.put("/anchors/{anchor_id}", response_model=AnchorResponse)
@@ -159,13 +175,9 @@ async def update_anchor(
         anchor.color = data.color
     await db.commit()
     await db.refresh(anchor)
-    return AnchorResponse(
-        id=anchor.id,
-        zone_id=anchor.zone_id,
-        polygon_points=anchor.polygon_points,
-        label=anchor.label,
-        color=anchor.color,
-    )
+    fp = await db.get(FloorPlan, anchor.floor_plan_id)
+    counts = await FloorPlanService(db).zone_item_counts(fp.location_id) if fp else {}
+    return _anchor_response(anchor, counts)
 
 
 @router.delete("/anchors/{anchor_id}")
