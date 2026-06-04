@@ -314,7 +314,7 @@ class _FloorPlanDetailScreenState extends State<FloorPlanDetailScreen> {
             onPressed: () => Navigator.pop(ctx, z['id'] as String),
             child: Row(
               children: [
-                CircleAvatar(radius: 6, backgroundColor: _parseColor(_colorForZone(z['id'])),
+                CircleAvatar(radius: 6, backgroundColor: _parseColor(_colorForZone(z['id']))),
                 const SizedBox(width: 10),
                 Text(z['name'] ?? z['id']),
               ],

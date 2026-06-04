@@ -30,7 +30,7 @@ class PushService {
         await saveTokenLocally(token);
         debugPrint('FCM token obtained (${token.length} chars)');
       }
-      FirebaseMessaging.onTokenRefresh.listen((t) async {
+      FirebaseMessaging.instance.onTokenRefresh.listen((t) async {
         await saveTokenLocally(t);
         await registerIfSaved();
       });
