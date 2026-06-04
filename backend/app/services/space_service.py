@@ -4,6 +4,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.space import Location, Zone, Container, Slot
 from app.schemas import space as schemas
+from app.services.space_templates import HOME_SPACE_TEMPLATE
 
 
 class SpaceService:
@@ -132,3 +133,49 @@ class SpaceService:
         await self.db.delete(slot)
         await self.db.commit()
         return True
+
+    async def get_slot_path(self, slot_id: str) -> schemas.SlotPathResponse | None:
+        stmt = (
+            select(Slot, Container, Zone, Location)
+            .join(Container, Slot.container_id == Container.id)
+            .join(Zone, Container.zone_id == Zone.id)
+            .join(Location, Zone.location_id == Location.id)
+            .where(Slot.id == slot_id)
+        )
+        result = await self.db.execute(stmt)
+        row = result.first()
+        if not row:
+            return None
+        slot, container, zone, location = row
+        return schemas.SlotPathResponse(
+            slot_id=slot.id,
+            slot_name=slot.name,
+            container_id=container.id,
+            container_name=container.name,
+            zone_id=zone.id,
+            zone_name=zone.name,
+            location_id=location.id,
+            location_name=location.name,
+            breadcrumb=f"{location.name} / {zone.name} / {container.name} / {slot.name}",
+        )
+
+    async def apply_home_template(self, location_id: str) -> int:
+        """Apply standard home zones/containers/slots to an existing location. Returns slot count."""
+        location = await self.db.get(Location, location_id)
+        if not location:
+            raise ValueError(f"Location {location_id} not found")
+
+        count = 0
+        for zone_name, containers in HOME_SPACE_TEMPLATE.items():
+            zone = Zone(location_id=location_id, name=zone_name)
+            self.db.add(zone)
+            await self.db.flush()
+            for container_name, slots in containers:
+                container = Container(zone_id=zone.id, name=container_name)
+                self.db.add(container)
+                await self.db.flush()
+                for slot_name, level in slots:
+                    self.db.add(Slot(container_id=container.id, name=slot_name, level=level))
+                    count += 1
+        await self.db.commit()
+        return count

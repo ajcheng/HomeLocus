@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
+import '../app/app_state.dart';
 import '../services/api_client.dart';
 import 'recognition_screen.dart';
 
@@ -23,7 +25,20 @@ class _PhotoUploadScreenState extends State<PhotoUploadScreen> {
   void initState() { super.initState(); _loadLocations(); }
 
   Future<void> _loadLocations() async {
-    try { final d = await _api.get('/space/locations'); setState(() { _locations = d is List ? d : []; }); } catch (_) {}
+    try {
+      final d = await _api.get('/space/locations');
+      final list = d is List ? d : [];
+      final activeId = context.read<AppState>().activeLocationId;
+      setState(() {
+        _locations = list;
+        if (activeId.isNotEmpty) {
+          _selectedLocationId = activeId;
+        } else if (list.isNotEmpty) {
+          _selectedLocationId = list[0]['id'];
+          context.read<AppState>().setActiveLocation(list[0]['id'], list[0]['name'] ?? '');
+        }
+      });
+    } catch (_) {}
     setState(() => _loading = false);
   }
 
@@ -92,7 +107,14 @@ class _PhotoUploadScreenState extends State<PhotoUploadScreen> {
       appBar: AppBar(title: const Text('拍照添加物品')),
       body: _loading ? const Center(child: CircularProgressIndicator()) : SingleChildScrollView(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Text('1. 选择地点', style: Theme.of(context).textTheme.titleMedium), const SizedBox(height: 8),
-        Wrap(spacing: 8, children: _locations.map((l) => ChoiceChip(label: Text(l['name'] ?? ''), selected: _selectedLocationId == l['id'], onSelected: (_) => _pickSlot(l['id']))).toList()),
+        Wrap(spacing: 8, children: _locations.map((l) => ChoiceChip(
+          label: Text(l['name'] ?? ''),
+          selected: _selectedLocationId == l['id'],
+          onSelected: (_) {
+            context.read<AppState>().setActiveLocation(l['id'], l['name'] ?? '');
+            _pickSlot(l['id']);
+          },
+        )).toList()),
         if (_selectedSlotId != null) ...[const SizedBox(height: 16), Card(color: Colors.green.shade50, child: Padding(padding: const EdgeInsets.all(12), child: Row(children: [const Icon(Icons.check_circle, color: Colors.green), const SizedBox(width: 8), Expanded(child: Text('位置: $_selectedSlotName')), IconButton(icon: const Icon(Icons.edit, size: 18), onPressed: () => _pickSlot(_selectedLocationId!))])))],
         const SizedBox(height: 20), Text('2. 拍照', style: Theme.of(context).textTheme.titleMedium), const SizedBox(height: 8),
         if (_image != null) ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.file(_image!, height: 250, width: double.infinity, fit: BoxFit.cover))

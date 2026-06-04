@@ -62,6 +62,18 @@ class ApiClient {
     return request.send();
   }
 
+  /// Multipart upload and parse JSON response (e.g. image search).
+  Future<dynamic> uploadMultipart(
+    String path,
+    File file, {
+    Map<String, String> fields = const {},
+    int timeoutSeconds = 120,
+  }) async {
+    final streamed = await uploadFile(path, file, fields);
+    final response = await http.Response.fromStream(streamed).timeout(Duration(seconds: timeoutSeconds));
+    return _handleResponse(response);
+  }
+
   dynamic _handleResponse(http.Response response) {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return jsonDecode(response.body);

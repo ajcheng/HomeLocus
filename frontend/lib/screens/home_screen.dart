@@ -29,6 +29,26 @@ class _HomeScreenState extends State<HomeScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    context.read<AppState>().addListener(_syncTabFromAppState);
+  }
+
+  @override
+  void dispose() {
+    context.read<AppState>().removeListener(_syncTabFromAppState);
+    super.dispose();
+  }
+
+  void _syncTabFromAppState() {
+    final tab = context.read<AppState>().homeTabIndex;
+    if (tab != _currentIndex && mounted) {
+      setState(() => _currentIndex = tab);
+      if (tab == 1) context.read<AppState>().refreshSearchItems();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: _screens[_currentIndex],
@@ -36,12 +56,8 @@ class _HomeScreenState extends State<HomeScreen> {
         selectedIndex: _currentIndex,
         onDestinationSelected: (i) {
           setState(() => _currentIndex = i);
-          if (i == 1) {
-            // Refresh recent items when opening search tab
-            try {
-              context.read<AppState>().refreshSearchItems();
-            } catch (_) {}
-          }
+          context.read<AppState>().setHomeTabIndex(i);
+          if (i == 1) context.read<AppState>().refreshSearchItems();
         },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home), label: '空间'),
@@ -83,7 +99,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     icon: Icons.mic,
                     label: '语音添加',
                     color: Colors.orange,
-                    onTap: () { Navigator.pop(ctx); Navigator.push(context, MaterialPageRoute(builder: (_) => const VoiceInputScreen(locationId: ''))); },
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      final locId = context.read<AppState>().activeLocationId;
+                      Navigator.push(context, MaterialPageRoute(
+                        builder: (_) => VoiceInputScreen(locationId: locId),
+                      ));
+                    },
                   ),
                 ]),
               ),

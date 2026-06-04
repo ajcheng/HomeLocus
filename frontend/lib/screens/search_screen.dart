@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../app/app_state.dart';
 import '../services/api_client.dart';
@@ -49,6 +51,35 @@ class _SearchScreenState extends State<SearchScreen> {
     if (mounted) setState(() => _loadingRecent = false);
   }
 
+  Future<void> _searchByImage() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery, maxWidth: 1920);
+    if (picked == null) return;
+    setState(() { _loading = true; _error = null; _hasSearched = true; });
+    try {
+      final locId = context.read<AppState>().activeLocationId;
+      final fields = <String, String>{};
+      if (locId.isNotEmpty) fields['location_id'] = locId;
+      final data = await _api.uploadMultipart('/search/by-image', File(picked.path), fields: fields);
+      setState(() { _results = (data['results'] as List?) ?? []; });
+    } catch (e) {
+      setState(() { _error = '$e'; _results = []; });
+    }
+    setState(() => _loading = false);
+  }
+
+  void _openInSpace(dynamic result) {
+    final slotId = result['slot_id']?.toString() ?? '';
+    if (slotId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('无法定位：缺少层级信息')));
+      return;
+    }
+    context.read<AppState>().openSlotInSpace(slotId);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已跳转到空间：${result['breadcrumb'] ?? ''}')),
+    );
+  }
+
   Future<void> _search(String text) async {
     if (text.isEmpty) return;
     setState(() { _loading = true; _error = null; _hasSearched = true; });
@@ -89,6 +120,7 @@ class _SearchScreenState extends State<SearchScreen> {
               onSubmitted: _search,
               leading: const Icon(Icons.search),
               trailing: [
+                IconButton(icon: const Icon(Icons.image_search), tooltip: '以图搜图', onPressed: _loading ? null : _searchByImage),
                 IconButton(icon: const Icon(Icons.refresh), tooltip: '刷新', onPressed: _loadRecentItems),
               ],
             ),
@@ -108,12 +140,17 @@ class _SearchScreenState extends State<SearchScreen> {
                       runSpacing: 6,
                       children: _recentItems.map((r) {
                         final label = r['item_label'] ?? '';
+                        final slotId = r['slot_id']?.toString() ?? '';
                         return ActionChip(
                           avatar: const Icon(Icons.inventory_2, size: 18),
                           label: Text(label, overflow: TextOverflow.ellipsis),
                           onPressed: () {
-                            _ctrl.text = label;
-                            _search(label);
+                            if (slotId.isNotEmpty) {
+                              _openInSpace(r);
+                            } else {
+                              _ctrl.text = label;
+                              _search(label);
+                            }
                           },
                         );
                       }).toList(),
@@ -162,6 +199,7 @@ class _SearchScreenState extends State<SearchScreen> {
                               return Card(
                                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                                 child: ListTile(
+                                  onTap: () => _openInSpace(r),
                                   leading: CircleAvatar(
                                     backgroundColor: Theme.of(context).colorScheme.primaryContainer,
                                     child: Text((r['item_label'] ?? '?')[0], style: const TextStyle(fontWeight: FontWeight.bold)),

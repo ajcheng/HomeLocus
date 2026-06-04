@@ -15,6 +15,10 @@ class _SpaceScreenState extends State<SpaceScreen> {
   List<dynamic> _locations = [];
   bool _loading = true;
   String? _error;
+  String? _navZoneId;
+  String? _navContainerId;
+  String? _highlightSlotId;
+  String? _lastHandledFocus;
 
   @override
   void initState() {
@@ -26,11 +30,48 @@ class _SpaceScreenState extends State<SpaceScreen> {
     setState(() { _loading = true; _error = null; });
     try {
       final data = await _api.get('/space/locations');
-      setState(() { _locations = data is List ? data : []; });
+      final list = data is List ? data : [];
+      setState(() { _locations = list; });
+      if (list.isNotEmpty && mounted) {
+        final app = context.read<AppState>();
+        if (app.activeLocationId.isEmpty) {
+          app.setActiveLocation(list[0]['id'], list[0]['name'] ?? '');
+        }
+      }
     } catch (e) {
       setState(() { _error = '$e'; });
     }
     setState(() => _loading = false);
+  }
+
+  Future<void> _navigateToSlot(String slotId) async {
+    try {
+      final path = await _api.get('/space/slots/$slotId/path');
+      setState(() {
+        _navZoneId = path['zone_id'];
+        _navContainerId = path['container_id'];
+        _highlightSlotId = slotId;
+      });
+      context.read<AppState>().setActiveLocation(path['location_id'], path['location_name'] ?? '');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('定位失败: $e')));
+      }
+    }
+  }
+
+  Future<void> _applyTemplate(String locationId) async {
+    try {
+      final r = await _api.post('/space/locations/$locationId/apply-template');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已应用模板，新增 ${r['slots_created'] ?? 0} 个层级')),
+        );
+      }
+      _load();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
   }
 
   Future<void> _addLocation() async {
@@ -48,7 +89,23 @@ class _SpaceScreenState extends State<SpaceScreen> {
     );
     if (ok == true && ctrl.text.isNotEmpty) {
       try {
-        await _api.post('/space/locations', body: {'name': ctrl.text, 'is_default': _locations.isEmpty});
+        final loc = await _api.post('/space/locations', body: {'name': ctrl.text, 'is_default': _locations.isEmpty});
+        if (mounted) {
+          final apply = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('应用标准模板？'),
+              content: const Text('可为新地点一键创建客厅、主卧、厨房等分区与储物模块。'),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('跳过')),
+                FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('应用')),
+              ],
+            ),
+          );
+          if (apply == true && loc is Map) {
+            await _applyTemplate(loc['id']);
+          }
+        }
         _load();
       } catch (e) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
@@ -58,6 +115,23 @@ class _SpaceScreenState extends State<SpaceScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final app = context.watch<AppState>();
+    final focus = app.focusSlotId;
+    if (focus != null && focus != _lastHandledFocus) {
+      _lastHandledFocus = focus;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _navigateToSlot(focus);
+          app.clearFocusSlot();
+        }
+      });
+    }
+
+    final activeId = app.activeLocationId;
+    final filtered = activeId.isEmpty
+        ? _locations
+        : _locations.where((l) => l['id'] == activeId).toList();
+
     return Scaffold(
       appBar: AppBar(title: const Text('空间管理'), actions: [
         IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
@@ -73,13 +147,73 @@ class _SpaceScreenState extends State<SpaceScreen> {
                 ]))
               : _locations.isEmpty
                   ? const Center(child: Text('还没有地点，点击 + 创建'))
-                  : RefreshIndicator(
-                      onRefresh: _load,
-                      child: ListView.builder(
-                        padding: const EdgeInsets.only(bottom: 80),
-                        itemCount: _locations.length,
-                        itemBuilder: (_, i) => _LocationTile(loc: _locations[i], api: _api, onRefresh: _load),
-                      ),
+                  : Column(
+                      children: [
+                        if (_locations.length > 1)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                            child: Row(children: [
+                              const Icon(Icons.place, size: 18, color: Colors.blue),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: DropdownButtonFormField<String>(
+                                  value: activeId.isNotEmpty ? activeId : null,
+                                  decoration: const InputDecoration(
+                                    labelText: '当前地点',
+                                    isDense: true,
+                                    border: OutlineInputBorder(),
+                                  ),
+                                  items: _locations.map<DropdownMenuItem<String>>((l) {
+                                    return DropdownMenuItem(
+                                      value: l['id'],
+                                      child: Text(l['name'] ?? l['id']),
+                                    );
+                                  }).toList(),
+                                  onChanged: (v) {
+                                    if (v == null) return;
+                                    final loc = _locations.firstWhere((l) => l['id'] == v);
+                                    app.setActiveLocation(v, loc['name'] ?? '');
+                                  },
+                                ),
+                              ),
+                            ]),
+                          ),
+                        if (_highlightSlotId != null)
+                          MaterialBanner(
+                            content: const Text('已从搜索结果定位到下列层级（高亮显示）'),
+                            leading: const Icon(Icons.my_location),
+                            actions: [
+                              TextButton(
+                                onPressed: () => setState(() => _highlightSlotId = null),
+                                child: const Text('关闭'),
+                              ),
+                            ],
+                          ),
+                        Expanded(
+                          child: RefreshIndicator(
+                            onRefresh: _load,
+                            child: filtered.isEmpty
+                                ? const Center(child: Text('请选择地点'))
+                                : ListView.builder(
+                                    padding: const EdgeInsets.only(bottom: 80),
+                                    itemCount: filtered.length,
+                                    itemBuilder: (_, i) {
+                                      final loc = filtered[i];
+                                      return _LocationTile(
+                                        loc: loc,
+                                        api: _api,
+                                        onRefresh: _load,
+                                        onApplyTemplate: () => _applyTemplate(loc['id']),
+                                        initiallyExpanded: true,
+                                        navZoneId: _navZoneId,
+                                        navContainerId: _navContainerId,
+                                        highlightSlotId: _highlightSlotId,
+                                      );
+                                    },
+                                  ),
+                          ),
+                        ),
+                      ],
                     ),
     );
   }
@@ -90,7 +224,22 @@ class _LocationTile extends StatefulWidget {
   final dynamic loc;
   final ApiClient api;
   final VoidCallback onRefresh;
-  const _LocationTile({required this.loc, required this.api, required this.onRefresh});
+  final VoidCallback onApplyTemplate;
+  final bool initiallyExpanded;
+  final String? navZoneId;
+  final String? navContainerId;
+  final String? highlightSlotId;
+
+  const _LocationTile({
+    required this.loc,
+    required this.api,
+    required this.onRefresh,
+    required this.onApplyTemplate,
+    this.initiallyExpanded = false,
+    this.navZoneId,
+    this.navContainerId,
+    this.highlightSlotId,
+  });
 
   @override
   State<_LocationTile> createState() => _LocationTileState();
@@ -161,15 +310,36 @@ class _LocationTileState extends State<_LocationTile> {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: ExpansionTile(
+        initiallyExpanded: widget.initiallyExpanded,
         leading: const Icon(Icons.location_city, color: Colors.blue),
         title: Text(widget.loc['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
         subtitle: Text('${widget.loc['zone_count'] ?? 0} 个分区'),
-        trailing: IconButton(icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20), onPressed: _deleteLocation),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.dashboard_customize, size: 20),
+              tooltip: '应用模板',
+              onPressed: widget.onApplyTemplate,
+            ),
+            IconButton(icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20), onPressed: _deleteLocation),
+          ],
+        ),
         onExpansionChanged: (exp) { if (exp) _loadZones(); },
         children: [
           if (_zones != null)
             for (final z in _zones!)
-              _ZoneTile(zone: z, api: widget.api),
+              _ZoneTile(
+                zone: z,
+                api: widget.api,
+                initiallyExpanded: z['id'] == widget.navZoneId,
+                navContainerId: widget.navContainerId,
+                highlightSlotId: widget.highlightSlotId,
+                onChanged: () {
+                  setState(() => _zones = null);
+                  _loadZones();
+                },
+              ),
           ListTile(leading: const Icon(Icons.add, color: Colors.green), title: const Text('添加分区'), onTap: _addZone),
         ],
       ),
@@ -181,7 +351,19 @@ class _LocationTileState extends State<_LocationTile> {
 class _ZoneTile extends StatefulWidget {
   final dynamic zone;
   final ApiClient api;
-  const _ZoneTile({required this.zone, required this.api});
+  final bool initiallyExpanded;
+  final String? navContainerId;
+  final String? highlightSlotId;
+  final VoidCallback onChanged;
+
+  const _ZoneTile({
+    required this.zone,
+    required this.api,
+    this.initiallyExpanded = false,
+    this.navContainerId,
+    this.highlightSlotId,
+    required this.onChanged,
+  });
 
   @override
   State<_ZoneTile> createState() => _ZoneTileState();
@@ -262,6 +444,7 @@ class _ZoneTileState extends State<_ZoneTile> {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Card(
         child: ExpansionTile(
+          initiallyExpanded: widget.initiallyExpanded,
           leading: const Icon(Icons.crop_square, size: 20),
           title: Text(widget.zone['name'] ?? ''),
           onExpansionChanged: (exp) { if (exp) _loadContainers(); },
@@ -276,16 +459,19 @@ class _ZoneTileState extends State<_ZoneTile> {
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
                     child: Card(
                       child: ExpansionTile(
+                        initiallyExpanded: c['id'] == widget.navContainerId,
                         leading: const Icon(Icons.cabin, size: 18),
                         title: Text(c['name'] ?? '', style: const TextStyle(fontSize: 14)),
                         subtitle: Text('${(c['slots'] as List?)?.length ?? 0} 个层级', style: const TextStyle(fontSize: 12, color: Colors.grey)),
                         children: [
                           if (c['slots'] != null)
                             for (final s in c['slots'] as List)
-                              _SlotItemsTile(slot: s, api: widget.api, onChanged: () {
-                                setState(() => _containers = null);
-                                _loadContainers();
-                              }),
+                              _SlotItemsTile(
+                                slot: s,
+                                api: widget.api,
+                                highlighted: s['id'] == widget.highlightSlotId,
+                                onChanged: widget.onChanged,
+                              ),
                           ListTile(
                             dense: true,
                             leading: const Icon(Icons.add, color: Colors.green, size: 16),
@@ -315,8 +501,14 @@ class _SlotItemsTile extends StatefulWidget {
   final dynamic slot;
   final ApiClient api;
   final VoidCallback onChanged;
+  final bool highlighted;
 
-  const _SlotItemsTile({required this.slot, required this.api, required this.onChanged});
+  const _SlotItemsTile({
+    required this.slot,
+    required this.api,
+    required this.onChanged,
+    this.highlighted = false,
+  });
 
   @override
   State<_SlotItemsTile> createState() => _SlotItemsTileState();
@@ -336,6 +528,39 @@ class _SlotItemsTileState extends State<_SlotItemsTile> {
       setState(() => _items = []);
     }
     setState(() => _loading = false);
+  }
+
+  Future<void> _markBorrowed(String itemId, String label) async {
+    final borrowerCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('借出「$label」'),
+        content: TextField(
+          controller: borrowerCtrl,
+          decoration: const InputDecoration(labelText: '借给谁（可选）'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确认借出')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await widget.api.post('/reminders/borrow', body: {
+        'item_id': itemId,
+        'borrower': borrowerCtrl.text.trim().isEmpty ? null : borrowerCtrl.text.trim(),
+        'expected_return_hours': 24,
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已标记借出，24小时后可提醒归位')));
+      }
+      setState(() => _items = null);
+      await _loadItems();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
   }
 
   Future<void> _addManualItem() async {
@@ -404,7 +629,10 @@ class _SlotItemsTileState extends State<_SlotItemsTile> {
       padding: const EdgeInsets.only(left: 8, right: 4),
       child: Card(
         margin: EdgeInsets.zero,
-        color: Colors.grey.shade50,
+        color: widget.highlighted ? Colors.amber.shade50 : Colors.grey.shade50,
+        shape: widget.highlighted
+            ? RoundedRectangleBorder(side: BorderSide(color: Colors.orange.shade400, width: 2))
+            : null,
         child: ExpansionTile(
           dense: true,
           leading: const Icon(Icons.grid_view, size: 16),
@@ -439,9 +667,11 @@ class _SlotItemsTileState extends State<_SlotItemsTile> {
                       if (it['category'] != null) it['category'],
                       if (it['brand'] != null) '品牌: ${it['brand']}',
                       if (it['is_chargeable'] == true) '需充电',
+                      if (it['is_borrowed'] == true) '已借出',
                     ].join(' · '),
                     style: const TextStyle(fontSize: 11),
                   ),
+                  onLongPress: () => _markBorrowed(it['id'], it['label'] ?? ''),
                 ),
             ListTile(
               dense: true,

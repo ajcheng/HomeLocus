@@ -32,6 +32,16 @@ async def delete_location(location_id: str, svc: SpaceService = Depends(get_spac
     return {"status": "deleted"}
 
 
+@router.post("/locations/{location_id}/apply-template")
+async def apply_location_template(location_id: str, svc: SpaceService = Depends(get_space_service)):
+    """Apply standard home template (客厅/主卧/…) to an existing location."""
+    try:
+        count = await svc.apply_home_template(location_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Location not found")
+    return {"status": "ok", "slots_created": count}
+
+
 # ---- Zone ----
 @router.post("/zones", response_model=schemas.ZoneResponse)
 async def create_zone(data: schemas.ZoneCreate, svc: SpaceService = Depends(get_space_service)):
@@ -85,6 +95,14 @@ async def update_slot(slot_id: str, data: schemas.SlotUpdate, svc: SpaceService 
     if not slot:
         raise HTTPException(status_code=404, detail="Slot not found")
     return schemas.SlotResponse(id=slot.id, container_id=slot.container_id, name=slot.name, level=slot.level)
+
+
+@router.get("/slots/{slot_id}/path", response_model=schemas.SlotPathResponse)
+async def get_slot_path(slot_id: str, svc: SpaceService = Depends(get_space_service)):
+    path = await svc.get_slot_path(slot_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="Slot not found")
+    return path
 
 
 @router.delete("/slots/{slot_id}")
