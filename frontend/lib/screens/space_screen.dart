@@ -19,7 +19,9 @@ class _SpaceScreenState extends State<SpaceScreen> {
   String? _navZoneId;
   String? _navContainerId;
   String? _highlightSlotId;
+  String? _highlightZoneId;
   String? _lastHandledFocus;
+  String? _lastHandledZoneFocus;
 
   @override
   void initState() {
@@ -128,6 +130,22 @@ class _SpaceScreenState extends State<SpaceScreen> {
       });
     }
 
+    final focusZone = app.focusZoneId;
+    if (focusZone != null && focusZone != _lastHandledZoneFocus) {
+      _lastHandledZoneFocus = focusZone;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {
+            _navZoneId = focusZone;
+            _highlightZoneId = focusZone;
+            _navContainerId = null;
+            _highlightSlotId = null;
+          });
+          app.clearFocusZone();
+        }
+      });
+    }
+
     final activeId = app.activeLocationId;
     final filtered = activeId.isEmpty
         ? _locations
@@ -180,13 +198,18 @@ class _SpaceScreenState extends State<SpaceScreen> {
                               ),
                             ]),
                           ),
-                        if (_highlightSlotId != null)
+                        if (_highlightSlotId != null || _highlightZoneId != null)
                           MaterialBanner(
-                            content: const Text('已从搜索结果定位到下列层级（高亮显示）'),
+                            content: Text(_highlightSlotId != null
+                                ? '已从搜索/平面图定位到层级（高亮显示）'
+                                : '已从平面图定位到分区（高亮显示）'),
                             leading: const Icon(Icons.my_location),
                             actions: [
                               TextButton(
-                                onPressed: () => setState(() => _highlightSlotId = null),
+                                onPressed: () => setState(() {
+                                  _highlightSlotId = null;
+                                  _highlightZoneId = null;
+                                }),
                                 child: const Text('关闭'),
                               ),
                             ],
@@ -210,6 +233,7 @@ class _SpaceScreenState extends State<SpaceScreen> {
                                         navZoneId: _navZoneId,
                                         navContainerId: _navContainerId,
                                         highlightSlotId: _highlightSlotId,
+                                        highlightZoneId: _highlightZoneId,
                                       );
                                     },
                                   ),
@@ -231,6 +255,7 @@ class _LocationTile extends StatefulWidget {
   final String? navZoneId;
   final String? navContainerId;
   final String? highlightSlotId;
+  final String? highlightZoneId;
 
   const _LocationTile({
     required this.loc,
@@ -241,6 +266,7 @@ class _LocationTile extends StatefulWidget {
     this.navZoneId,
     this.navContainerId,
     this.highlightSlotId,
+    this.highlightZoneId,
   });
 
   @override
@@ -337,6 +363,7 @@ class _LocationTileState extends State<_LocationTile> {
                 initiallyExpanded: z['id'] == widget.navZoneId,
                 navContainerId: widget.navContainerId,
                 highlightSlotId: widget.highlightSlotId,
+                highlightZoneId: widget.highlightZoneId,
                 onChanged: () {
                   setState(() => _zones = null);
                   _loadZones();
@@ -356,6 +383,7 @@ class _ZoneTile extends StatefulWidget {
   final bool initiallyExpanded;
   final String? navContainerId;
   final String? highlightSlotId;
+  final String? highlightZoneId;
   final VoidCallback onChanged;
 
   const _ZoneTile({
@@ -364,6 +392,7 @@ class _ZoneTile extends StatefulWidget {
     this.initiallyExpanded = false,
     this.navContainerId,
     this.highlightSlotId,
+    this.highlightZoneId,
     required this.onChanged,
   });
 
@@ -442,11 +471,16 @@ class _ZoneTileState extends State<_ZoneTile> {
 
   @override
   Widget build(BuildContext context) {
+    final highlighted = widget.zone['id'] == widget.highlightZoneId;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Card(
+        color: highlighted ? Colors.amber.shade50 : null,
+        shape: highlighted
+            ? RoundedRectangleBorder(side: BorderSide(color: Colors.orange.shade400, width: 2))
+            : null,
         child: ExpansionTile(
-          initiallyExpanded: widget.initiallyExpanded,
+          initiallyExpanded: widget.initiallyExpanded || highlighted,
           leading: const Icon(Icons.crop_square, size: 20),
           title: Text(widget.zone['name'] ?? ''),
           onExpansionChanged: (exp) { if (exp) _loadContainers(); },

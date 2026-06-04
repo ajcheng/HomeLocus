@@ -97,6 +97,14 @@ async def update_slot(slot_id: str, data: schemas.SlotUpdate, svc: SpaceService 
     return schemas.SlotResponse(id=slot.id, container_id=slot.container_id, name=slot.name, level=slot.level)
 
 
+@router.get("/zones/{zone_id}/path", response_model=schemas.ZonePathResponse)
+async def get_zone_path(zone_id: str, svc: SpaceService = Depends(get_space_service)):
+    path = await svc.get_zone_path(zone_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="Zone not found")
+    return path
+
+
 @router.get("/slots/{slot_id}/path", response_model=schemas.SlotPathResponse)
 async def get_slot_path(slot_id: str, svc: SpaceService = Depends(get_space_service)):
     path = await svc.get_slot_path(slot_id)

@@ -63,7 +63,7 @@
 | 充电/借出提醒 API | P1 | ✅ | Beat 扫描；**无 FCM 推送** |
 | 借出标记 UI | P1 | ✅ | 空间页长按物品借出；提醒页可「已归位」 |
 | 家庭组/邀请 | P2→已实现 | ✅ | 超前于原 PRD 二期 |
-| 平面图 | P2 | ⚠️ 部分 | App 可上传/查看/点击标注分区 |
+| 平面图 | P2 | ✅ 基本完成 | 框选标注、点击跳转分区、坐标对齐、编辑删除 |
 | 导入导出/回收站 | P2 | ❌ | 未做 |
 | Web 管理后台 | 一期 | ⚠️ | 同 Flutter Web 静态资源，非独立后台 |
 
@@ -152,6 +152,8 @@
 | POST | `/api/v1/space/containers/{id}/slots` | 添加层级 |
 | GET | `/api/v1/space/slots/{slot_id}/path` | 层级路径（跳转空间用） |
 | POST | `/api/v1/space/locations/{id}/apply-template` | 为已有地点应用标准模板 |
+| GET | `/api/v1/space/zones/{zone_id}/path` | 分区路径（平面图跳转用） |
+| PUT | `/api/v1/floor-plans/anchors/{id}` | 更新区域标注 |
 
 ### 5.2 物品
 
@@ -248,7 +250,7 @@
 
 ### P1
 2. PaddleOCR 本地部署（可选，已有 Vision OCR 回退）
-3. 平面图多边形编辑、点击区域跳转分区
+3. 平面图手绘多边形、分区物品数量展示
 
 ### P2
 9. 向量检索（CLIP embedding）

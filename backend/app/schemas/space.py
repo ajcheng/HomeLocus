@@ -73,6 +73,13 @@ class SlotUpdate(BaseModel):
     level: Optional[int] = None
 
 
+class ZonePathResponse(BaseModel):
+    zone_id: str
+    zone_name: str
+    location_id: str
+    location_name: str
+
+
 class SlotPathResponse(BaseModel):
     slot_id: str
     slot_name: str

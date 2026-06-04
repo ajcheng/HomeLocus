@@ -134,6 +134,24 @@ class SpaceService:
         await self.db.commit()
         return True
 
+    async def get_zone_path(self, zone_id: str) -> schemas.ZonePathResponse | None:
+        stmt = (
+            select(Zone, Location)
+            .join(Location, Zone.location_id == Location.id)
+            .where(Zone.id == zone_id)
+        )
+        result = await self.db.execute(stmt)
+        row = result.first()
+        if not row:
+            return None
+        zone, location = row
+        return schemas.ZonePathResponse(
+            zone_id=zone.id,
+            zone_name=zone.name,
+            location_id=location.id,
+            location_name=location.name,
+        )
+
     async def get_slot_path(self, slot_id: str) -> schemas.SlotPathResponse | None:
         stmt = (
             select(Slot, Container, Zone, Location)

@@ -8,6 +8,7 @@ class AppState extends ChangeNotifier {
   int _searchListVersion = 0;
   int _homeTabIndex = 0;
   String? _focusSlotId;
+  String? _focusZoneId;
 
   String get token => _token;
   String get activeLocationId => _activeLocationId;
@@ -17,6 +18,7 @@ class AppState extends ChangeNotifier {
   int get searchListVersion => _searchListVersion;
   int get homeTabIndex => _homeTabIndex;
   String? get focusSlotId => _focusSlotId;
+  String? get focusZoneId => _focusZoneId;
 
   void refreshSearchItems() {
     _searchListVersion++;
@@ -44,7 +46,20 @@ class AppState extends ChangeNotifier {
   /// Switch to space tab and expand tree to the given slot.
   void openSlotInSpace(String slotId) {
     _focusSlotId = slotId;
+    _focusZoneId = null;
     _homeTabIndex = 0;
+    notifyListeners();
+  }
+
+  /// Switch to space tab and expand the given zone (from floor plan).
+  void openZoneInSpace(String zoneId, {String? locationId, String? locationName}) {
+    _focusZoneId = zoneId;
+    _focusSlotId = null;
+    _homeTabIndex = 0;
+    if (locationId != null && locationId.isNotEmpty) {
+      _activeLocationId = locationId;
+      if (locationName != null) _activeLocationName = locationName;
+    }
     notifyListeners();
   }
 
@@ -55,5 +70,9 @@ class AppState extends ChangeNotifier {
 
   void clearFocusSlot() {
     _focusSlotId = null;
+  }
+
+  void clearFocusZone() {
+    _focusZoneId = null;
   }
 }

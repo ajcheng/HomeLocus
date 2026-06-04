@@ -24,6 +24,13 @@ class AnchorCreate(BaseModel):
     color: str = "#4A90D9"
 
 
+class AnchorUpdate(BaseModel):
+    zone_id: Optional[str] = None
+    polygon_points: Optional[list[dict]] = None
+    label: Optional[str] = None
+    color: Optional[str] = None
+
+
 class AnchorResponse(BaseModel):
     id: str
     zone_id: Optional[str] = None
@@ -129,6 +136,35 @@ async def add_anchor(
     return AnchorResponse(
         id=anchor.id, zone_id=anchor.zone_id,
         polygon_points=anchor.polygon_points, label=anchor.label, color=anchor.color,
+    )
+
+
+@router.put("/anchors/{anchor_id}", response_model=AnchorResponse)
+async def update_anchor(
+    anchor_id: str,
+    data: AnchorUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    anchor = await db.get(PlanAnchor, anchor_id)
+    if not anchor:
+        raise HTTPException(status_code=404, detail="Anchor not found")
+    if data.zone_id is not None:
+        anchor.zone_id = data.zone_id
+    if data.polygon_points is not None:
+        anchor.polygon_points = data.polygon_points
+    if data.label is not None:
+        anchor.label = data.label
+    if data.color is not None:
+        anchor.color = data.color
+    await db.commit()
+    await db.refresh(anchor)
+    return AnchorResponse(
+        id=anchor.id,
+        zone_id=anchor.zone_id,
+        polygon_points=anchor.polygon_points,
+        label=anchor.label,
+        color=anchor.color,
     )
 
 

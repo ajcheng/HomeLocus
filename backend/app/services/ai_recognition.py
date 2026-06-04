@@ -206,7 +206,7 @@ class AIRecognitionService:
                 raw = await self._vision_text_anthropic(image_b64, OCR_PROMPT)
             if not raw:
                 return []
-            data = self._parse_json_content(raw)
+            data = self._parse_vision_response(raw)
             lines = data.get("lines", [])
             if isinstance(lines, list):
                 return [str(x).strip() for x in lines if str(x).strip()]
