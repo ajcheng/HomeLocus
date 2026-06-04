@@ -24,10 +24,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _load() async {
-    // In a full implementation, these would come from SharedPreferences
     setState(() {
       _serverCtrl.text = ApiClient.baseUrl;
     });
+    final saved = await PushService.loadTokenLocally();
+    if (saved != null && saved.isNotEmpty) {
+      _fcmTokenCtrl.text = saved;
+    }
   }
 
   Future<void> _registerPushToken() async {
@@ -150,9 +153,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Text('推送通知', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  const Text(
-                    '配置 FCM_SERVER_KEY 后，在 Firebase 控制台获取设备 Token 并注册，即可接收充电/借出提醒。',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  Text(
+                    PushService.firebaseReady
+                        ? 'Firebase 已连接，Token 将自动同步。'
+                        : '未检测到 google-services.json：请从 Firebase 下载配置，或手动粘贴 Token。',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -198,7 +203,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Text('关于', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  const Text('HomeLocus v0.1.14'),
+                  const Text('HomeLocus v0.1.15'),
                   const SizedBox(height: 4),
                   const Text('家庭物品存放管理系统'),
                   const SizedBox(height: 8),

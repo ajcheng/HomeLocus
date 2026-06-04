@@ -95,7 +95,13 @@ class SearchService:
         location_id = await self._location_id_for_slot(item.slot_id)
         tags = item.tags if isinstance(item.tags, list) else []
         search_engine.index_text(
-            item.id, item.label, item.brand, tags, "", location_id, item.category
+            item.id,
+            item.label,
+            item.brand,
+            tags,
+            item.ocr_text or "",
+            location_id,
+            item.category,
         )
 
     async def reindex_all_items(self) -> int:

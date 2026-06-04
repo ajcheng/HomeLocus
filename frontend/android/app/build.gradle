@@ -18,8 +18,8 @@ android {
         applicationId "com.homelocus.homelocus"
         minSdk 33
         targetSdk 36
-        versionCode 12
-        versionName "0.1.12"
+        versionCode 15
+        versionName "0.1.15"
     }
     buildTypes {
         release {
@@ -29,4 +29,9 @@ android {
 }
 flutter {
     source '../..'
+}
+
+// Apply only when Firebase config file exists (copy from google-services.json.example).
+if (file("google-services.json").exists()) {
+    apply plugin: 'com.google.gms.google-services'
 }

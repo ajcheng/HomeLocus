@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app/app_state.dart';
 import 'app/theme.dart';
 import 'services/api_client.dart';
+import 'services/push_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 
@@ -22,6 +23,8 @@ void main() async {
   if (savedUrl != null && savedUrl.isNotEmpty) {
     ApiClient.baseUrl = savedUrl;
   }
+
+  await PushService.initialize();
 
   runApp(
     ChangeNotifierProvider(

@@ -51,7 +51,7 @@
 | 空间管理 | P0 | ✅ 基本完成 | 四级 CRUD；创建家庭时带模板；App 树形浏览 |
 | **按层级浏览物品** | P0 | ✅ **本次完成** | `GET /items/slot/{id}` + App 展开显示 |
 | 拍照 + AI 识别 | P0 | ✅ 可用 | FlowBar/kimi 视觉；约 60–100s；需配置 `AI_API_KEY` |
-| OCR | P0 | ❌ 未启用 | PaddleOCR 未配置 |
+| OCR | P0 | ⚠️ 部分 | Vision API 提取文字（无 PaddleOCR 本地部署时） |
 | 语音录入 | P0 | ✅ 基本完成 | 真实录音 + Whisper ASR；文本 NLP 备用 |
 | **手动录入** | P0 | ✅ **本次完成** | `POST /items/manual` + 空间页入口 |
 | 确认 + 索引 | P0 | ✅ | 确认后写 Meilisearch；DB 回退搜索 |
@@ -63,7 +63,7 @@
 | 充电/借出提醒 API | P1 | ✅ | Beat 扫描；**无 FCM 推送** |
 | 借出标记 UI | P1 | ✅ | 空间页长按物品借出；提醒页可「已归位」 |
 | 家庭组/邀请 | P2→已实现 | ✅ | 超前于原 PRD 二期 |
-| 平面图 | P2 | ⚠️ API 有 | App 未集成 |
+| 平面图 | P2 | ⚠️ 部分 | App 可上传/查看/点击标注分区 |
 | 导入导出/回收站 | P2 | ❌ | 未做 |
 | Web 管理后台 | 一期 | ⚠️ | 同 Flutter Web 静态资源，非独立后台 |
 
@@ -244,12 +244,11 @@
 ## 10. 待办优先级（研发 backlog）
 
 ### P0（下一迭代）
-1. App 集成 `firebase_messaging` 自动获取 FCM Token
-2. 配置生产环境 `FCM_SERVER_KEY`
+1. 生产环境配置 `FCM_SERVER_KEY` + 放置 `google-services.json` 后验证推送
 
 ### P1
-3. PaddleOCR
-4. ~~24h 未处理再提醒~~ ✅ 定时任务推送后顺延 24h
+2. PaddleOCR 本地部署（可选，已有 Vision OCR 回退）
+3. 平面图多边形编辑、点击区域跳转分区
 
 ### P2
 9. 向量检索（CLIP embedding）

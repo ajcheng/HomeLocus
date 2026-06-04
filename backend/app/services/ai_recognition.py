@@ -36,6 +36,11 @@ Respond ONLY in JSON format:
 
 If you cannot identify any items clearly, return: {"items": [], "summary": "No clear items detected"}"""
 
+OCR_PROMPT = """Read ALL visible text in this image (labels, brands, handwriting, receipts, tags).
+Return ONLY JSON:
+{"lines": ["line1", "line2"]}
+Use Chinese where shown. If no text, return {"lines": []}"""
+
 
 class AIRecognitionService:
     """AI-powered image recognition (OpenAI-compatible or Anthropic Vision API)."""
@@ -179,9 +184,90 @@ class AIRecognitionService:
             w, h = 800, 600
         return {"items": [], "summary": f"Image size: {w}x{h}. AI recognition not configured."}
 
+    async def _image_to_b64(self, image_path: str) -> str:
+        img = Image.open(image_path).convert("RGB")
+        if max(img.size) > 1024:
+            ratio = 1024 / max(img.size)
+            img = img.resize((int(img.width * ratio), int(img.height * ratio)), Image.LANCZOS)
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=70)
+        return base64.b64encode(buf.getvalue()).decode()
+
     async def extract_text_ocr(self, image_path: str) -> list[str]:
-        logger.info(f"OCR skipped for {image_path} (PaddleOCR not configured)")
+        """Extract text via Vision API when PaddleOCR is not deployed."""
+        if not self.api_key:
+            logger.info(f"OCR skipped for {image_path} (AI_API_KEY not configured)")
+            return []
+        try:
+            image_b64 = await self._image_to_b64(image_path)
+            if self._prefers_openai_api():
+                raw = await self._vision_text_openai(image_b64, OCR_PROMPT)
+            else:
+                raw = await self._vision_text_anthropic(image_b64, OCR_PROMPT)
+            if not raw:
+                return []
+            data = self._parse_json_content(raw)
+            lines = data.get("lines", [])
+            if isinstance(lines, list):
+                return [str(x).strip() for x in lines if str(x).strip()]
+        except Exception as e:
+            logger.error(f"Vision OCR failed for {image_path}: {e}")
         return []
+
+    async def _vision_text_openai(self, image_b64: str, prompt: str) -> str | None:
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "messages": [{
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+                            ],
+                        }],
+                        "max_tokens": 1024,
+                    },
+                )
+                if response.status_code != 200:
+                    return None
+                return response.json()["choices"][0]["message"]["content"].strip()
+        except Exception:
+            return None
+
+    async def _vision_text_anthropic(self, image_b64: str, prompt: str) -> str | None:
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/anthropic/v1/messages",
+                    headers={
+                        "x-api-key": self.api_key,
+                        "anthropic-version": "2023-06-01",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "max_tokens": 1024,
+                        "messages": [{
+                            "role": "user",
+                            "content": [
+                                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_b64}},
+                                {"type": "text", "text": prompt},
+                            ],
+                        }],
+                    },
+                )
+                if response.status_code != 200:
+                    return None
+                return response.json()["content"][0]["text"].strip()
+        except Exception:
+            return None
 
     def extract_text_sync(self, image_path: str) -> list[str]:
         import asyncio

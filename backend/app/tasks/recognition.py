@@ -11,7 +11,7 @@ from app.services.ai_recognition import ai_recognition
 logger = logging.getLogger(__name__)
 
 
-def _persist_task_result(task_id: str, items: list) -> None:
+def _persist_task_result(task_id: str, items: list, ocr_text: str = "") -> None:
     """Write recognition items to DB (sync — safe inside Celery fork worker)."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
@@ -31,6 +31,8 @@ def _persist_task_result(task_id: str, items: list) -> None:
                 logger.warning(f"[{task_id}] Snapshot not found for DB persist")
                 return
             snapshot.ai_response_raw = {"items": items}
+            if ocr_text:
+                snapshot.ocr_text = ocr_text
             for item_data in items:
                 kwargs = dict(
                     slot_id=snapshot.slot_id,
@@ -42,6 +44,7 @@ def _persist_task_result(task_id: str, items: list) -> None:
                     confidence=item_data.get("confidence"),
                     ai_label_raw=item_data.get("label"),
                     category=item_data.get("category"),
+                    ocr_text=ocr_text or None,
                 )
                 if item_data.get("id"):
                     kwargs["id"] = item_data["id"]
@@ -77,9 +80,26 @@ def process_upload(self, task_id: str, filepath: str, slot_id: str):
         result["compressed_url"] = storage_service.get_presigned_url(comp_name)
         logger.info(f"[{task_id}] Images stored")
 
-        # Step 3: OCR (inline)
+        # Step 3: OCR (Vision API fallback when PaddleOCR not deployed)
         ocr_texts = ai_recognition.extract_text_sync(filepath)
         result["ocr_texts"] = ocr_texts
+        ocr_blob = " ".join(ocr_texts)
+        if ocr_blob:
+            from sqlalchemy import create_engine
+            from sqlalchemy.orm import sessionmaker
+            from app.core.config import settings
+            from app.models.item import ImageSnapshot
+
+            try:
+                engine = create_engine(settings.database_url_sync)
+                Session = sessionmaker(bind=engine)
+                with Session() as session:
+                    snap = session.query(ImageSnapshot).filter_by(task_id=task_id).first()
+                    if snap:
+                        snap.ocr_text = ocr_blob
+                        session.commit()
+            except Exception as e:
+                logger.warning(f"[{task_id}] Failed to save OCR text: {e}")
 
         # Step 4: Vision AI (run async in sync context via asyncio)
         vision_result = asyncio.run(ai_recognition.analyze_image(filepath))
@@ -103,7 +123,7 @@ def process_upload(self, task_id: str, filepath: str, slot_id: str):
         result["status"] = "completed"
         logger.info(f"[{task_id}] Pipeline completed: {len(result['items'])} items")
 
-        _persist_task_result(task_id, result["items"])
+        _persist_task_result(task_id, result["items"], ocr_blob)
 
     except Exception as e:
         logger.error(f"[{task_id}] Pipeline failed: {e}")

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app/app_state.dart';
 import '../services/api_client.dart';
+import 'floor_plan_screen.dart';
 
 class SpaceScreen extends StatefulWidget {
   const SpaceScreen({super.key});
@@ -134,6 +135,7 @@ class _SpaceScreenState extends State<SpaceScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('空间管理'), actions: [
+        IconButton(icon: const Icon(Icons.map_outlined), tooltip: '平面图', onPressed: () => openFloorPlan(context)),
         IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
       ]),
       floatingActionButton: FloatingActionButton(onPressed: _addLocation, child: const Icon(Icons.add_location_alt)),
