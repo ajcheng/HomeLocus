@@ -150,6 +150,8 @@
 | GET | `/api/v1/space/zones?location_id=` | 分区 |
 | POST | `/api/v1/space/containers` | 储物模块（可带 slots） |
 | POST | `/api/v1/space/containers/{id}/slots` | 添加层级 |
+| GET | `/api/v1/space/slots/{slot_id}/path` | 层级路径（跳转空间用） |
+| POST | `/api/v1/space/locations/{id}/apply-template` | 为已有地点应用标准模板 |
 
 ### 5.2 物品
 
