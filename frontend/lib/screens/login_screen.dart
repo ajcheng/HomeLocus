@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_client.dart';
+import '../services/push_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -57,6 +58,7 @@ class _LoginScreenState extends State<LoginScreen> {
       // Set global auth for all subsequent API calls
       ApiClient.authToken = token;
       ApiClient.baseUrl = url;
+      await PushService.registerIfSaved();
 
       // Persist for next app launch
       await prefs.setString('auth_token', token);

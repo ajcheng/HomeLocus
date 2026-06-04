@@ -39,6 +39,7 @@ class Settings(BaseSettings):
 
     # FCM (Firebase Cloud Messaging legacy server key)
     fcm_server_key: str = ""
+    reminder_repeat_hours: int = 24
 
     # Auth
     jwt_secret: str = "homelocus-dev-secret-change-in-production"

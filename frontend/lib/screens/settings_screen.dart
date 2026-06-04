@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api_client.dart';
+import '../services/push_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -39,6 +40,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     setState(() => _registeringPush = true);
     try {
+      await PushService.saveTokenLocally(token);
       await ApiClient().post('/notifications/device-token', body: {
         'token': token,
         'platform': 'android',
@@ -196,7 +198,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Text('关于', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  const Text('HomeLocus v0.1.13'),
+                  const Text('HomeLocus v0.1.14'),
                   const SizedBox(height: 4),
                   const Text('家庭物品存放管理系统'),
                   const SizedBox(height: 8),

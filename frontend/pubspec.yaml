@@ -1,7 +1,7 @@
 name: homelocus
 description: 家庭物品存放管理系统
 publish_to: 'none'
-version: 0.1.13+13
+version: 0.1.14+14
 
 environment:
   sdk: ^3.6.0

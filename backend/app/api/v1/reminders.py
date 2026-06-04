@@ -46,14 +46,18 @@ async def mark_returned(data: schemas.BorrowReturnRequest, svc: ReminderService 
     return {"item_id": data.item_id, "status": "returned"}
 
 
+@router.get("/pending/count")
+async def get_pending_reminder_count(
+    location_id: str | None = None,
+    svc: ReminderService = Depends(get_reminder_service),
+):
+    count = await svc.count_pending_reminders(location_id)
+    return {"count": count}
+
+
 @router.get("/pending", response_model=list[schemas.ReminderResponse])
-async def get_pending_reminders(location_id: str | None = None, svc: ReminderService = Depends(get_reminder_service)):
-    reminders = await svc.get_pending_reminders(location_id)
-    return [
-        schemas.ReminderResponse(
-            id=r.id, item_id=r.item_id, reminder_type=r.reminder_type,
-            next_remind_at=r.next_remind_at, cycle_days=r.cycle_days,
-            is_resolved=r.is_resolved, notes=r.notes, created_at=r.created_at,
-        )
-        for r in reminders
-    ]
+async def get_pending_reminders(
+    location_id: str | None = None,
+    svc: ReminderService = Depends(get_reminder_service),
+):
+    return await svc.get_pending_reminders(location_id)

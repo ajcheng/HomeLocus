@@ -3,9 +3,7 @@ from datetime import datetime, timezone
 
 from celery.schedules import crontab
 from sqlalchemy import select, update
-from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -25,12 +23,13 @@ celery_app.conf.beat_schedule = {
 @celery_app.task
 def check_pending_reminders():
     """
-    Scan for due reminders and log them.
-    When push notification service is available, this will send FCM/APNs messages.
+    Scan due reminders, send push, then reschedule next notify in 24h until resolved.
     """
     from app.core.database import async_session
     from app.models.reminder import Reminder
     from app.models.item import Item
+    from app.services.notification_service import notification_service
+    from app.services.reminder_service import ReminderService
     import asyncio
 
     async def _scan():
@@ -46,27 +45,29 @@ def check_pending_reminders():
                 .order_by(Reminder.next_remind_at)
             )
             rows = result.all()
-            count = len(rows)
-            if count > 0:
-                from app.services.notification_service import notification_service
+            svc = ReminderService(session)
 
-                logger.info(f"Found {count} pending reminders:")
-                for reminder, item in rows:
-                    logger.info(
-                        f"  [{reminder.reminder_type}] {item.label}: "
-                        f"due {reminder.next_remind_at.isoformat()}"
-                        f"{' — ' + (reminder.notes or '')}"
+            for reminder, item in rows:
+                logger.info(
+                    f"  [{reminder.reminder_type}] {item.label}: "
+                    f"due {reminder.next_remind_at.isoformat()} "
+                    f"(notify #{reminder.notify_count or 0})"
+                    f"{' — ' + (reminder.notes or '')}"
+                )
+                user_id = "system"
+                if reminder.reminder_type == "charge":
+                    await notification_service.notify_charge_reminder(
+                        user_id, item.label, item.charge_cycle_days or 90
                     )
-                    user_id = "system"
-                    if reminder.reminder_type == "charge":
-                        await notification_service.notify_charge_reminder(
-                            user_id, item.label, item.charge_cycle_days or 90
-                        )
-                    elif reminder.reminder_type == "borrow":
-                        await notification_service.notify_borrow_return(
-                            user_id, item.label, item.borrower or "未知"
-                        )
-            return count
+                elif reminder.reminder_type == "borrow":
+                    await notification_service.notify_borrow_return(
+                        user_id, item.label, item.borrower or "未知"
+                    )
+                await svc.reschedule_after_notify(reminder)
+
+            if rows:
+                logger.info(f"Processed {len(rows)} due reminders (next in 24h if unresolved)")
+            return len(rows)
 
     try:
         count = asyncio.run(_scan())
@@ -106,6 +107,5 @@ def cleanup_expired_invitations():
 @celery_app.task
 def send_reminder_notification(reminder_id: str, item_label: str, reminder_type: str, notes: str | None = None):
     """Send push notification for a specific reminder (placeholder)."""
-    # TODO: Integrate FCM (Firebase Cloud Messaging) for Android push
     logger.info(f"NOTIFICATION: [{reminder_type}] {item_label}: {notes or 'Reminder due'}")
     return {"status": "ok", "reminder_id": reminder_id}

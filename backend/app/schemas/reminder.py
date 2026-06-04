@@ -32,6 +32,11 @@ class ReminderResponse(BaseModel):
     cycle_days: Optional[int] = None
     is_resolved: bool
     notes: Optional[str] = None
+    last_notified_at: Optional[datetime] = None
+    notify_count: int = 0
     created_at: datetime
+    item_label: Optional[str] = None
+    breadcrumb: Optional[str] = None
+    slot_id: Optional[str] = None
 
     model_config = {"from_attributes": True}

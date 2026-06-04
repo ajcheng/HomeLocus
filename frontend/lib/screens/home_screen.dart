@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../app/app_state.dart';
+import '../services/api_client.dart';
+import '../services/push_service.dart';
 import 'space_screen.dart';
 import 'search_screen.dart';
 import 'reminders_screen.dart';
@@ -20,6 +22,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
+  int _reminderBadge = 0;
 
   final _screens = const [
     SpaceScreen(),
@@ -32,6 +35,8 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     context.read<AppState>().addListener(_syncTabFromAppState);
+    _loadReminderCount();
+    PushService.registerIfSaved();
   }
 
   @override
@@ -40,12 +45,32 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  Future<void> _loadReminderCount() async {
+    try {
+      final locId = context.read<AppState>().activeLocationId;
+      final path = locId.isNotEmpty
+          ? '/reminders/pending/count?location_id=$locId'
+          : '/reminders/pending/count';
+      final data = await ApiClient().get(path);
+      if (mounted) setState(() => _reminderBadge = data['count'] ?? 0);
+    } catch (_) {}
+  }
+
   void _syncTabFromAppState() {
     final tab = context.read<AppState>().homeTabIndex;
     if (tab != _currentIndex && mounted) {
       setState(() => _currentIndex = tab);
       if (tab == 1) context.read<AppState>().refreshSearchItems();
+      if (tab == 2) _loadReminderCount();
     }
+  }
+
+  Widget _badgeIcon(IconData icon, {bool selected = false}) {
+    return Badge(
+      isLabelVisible: _reminderBadge > 0,
+      label: Text('$_reminderBadge'),
+      child: Icon(selected ? Icons.notifications : icon),
+    );
   }
 
   @override
@@ -58,12 +83,17 @@ class _HomeScreenState extends State<HomeScreen> {
           setState(() => _currentIndex = i);
           context.read<AppState>().setHomeTabIndex(i);
           if (i == 1) context.read<AppState>().refreshSearchItems();
+          if (i == 2) _loadReminderCount();
         },
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.home), label: '空间'),
-          NavigationDestination(icon: Icon(Icons.search), label: '搜索'),
-          NavigationDestination(icon: Icon(Icons.notifications), label: '提醒'),
-          NavigationDestination(icon: Icon(Icons.people), label: '家庭'),
+        destinations: [
+          const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: '空间'),
+          const NavigationDestination(icon: Icon(Icons.search), label: '搜索'),
+          NavigationDestination(
+            icon: _badgeIcon(Icons.notifications_outlined),
+            selectedIcon: _badgeIcon(Icons.notifications, selected: true),
+            label: '提醒',
+          ),
+          const NavigationDestination(icon: Icon(Icons.people_outline), selectedIcon: Icon(Icons.people), label: '家庭'),
         ],
       ),
       appBar: AppBar(
