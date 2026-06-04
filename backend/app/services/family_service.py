@@ -6,6 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.family import Family, FamilyMember, Invitation
 from app.models.user import User
+from app.models.floor_plan import FloorPlan
 from app.models.space import Location, Zone, Container, Slot
 from app.schemas import family as schemas
 
@@ -27,7 +28,7 @@ class FamilyService:
         self.db.add(member)
 
         # Auto-create family space with preset zones/containers/slots
-        location = Location(name=name, is_default=False)
+        location = Location(name=name, is_default=False, family_id=family.id)
         self.db.add(location)
         await self.db.flush()
 
@@ -47,7 +48,40 @@ class FamilyService:
 
         await self.db.commit()
         await self.db.refresh(family)
+        family._location_id = location.id  # type: ignore[attr-defined]
         return family
+
+    async def get_family_location_id(self, family_id: str) -> str | None:
+        result = await self.db.execute(
+            select(Location.id).where(Location.family_id == family_id).limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_family_zone_count(self, location_id: str | None) -> int:
+        if not location_id:
+            return 0
+        result = await self.db.execute(
+            select(func.count()).select_from(Zone).where(Zone.location_id == location_id)
+        )
+        return result.scalar() or 0
+
+    async def delete_family(self, family_id: str) -> bool:
+        family = await self.get_family(family_id)
+        if not family:
+            return False
+        loc_result = await self.db.execute(
+            select(Location).where(Location.family_id == family_id)
+        )
+        for loc in loc_result.scalars().all():
+            fp_result = await self.db.execute(
+                select(FloorPlan).where(FloorPlan.location_id == loc.id)
+            )
+            for fp in fp_result.scalars().all():
+                await self.db.delete(fp)
+            await self.db.delete(loc)
+        await self.db.delete(family)
+        await self.db.commit()
+        return True
 
     async def list_families(self, user: User) -> list[dict]:
         result = await self.db.execute(
@@ -63,9 +97,12 @@ class FamilyService:
                 select(func.count()).select_from(FamilyMember).where(FamilyMember.family_id == fam.id)
             )
             member_count = count_result.scalar() or 0
+            location_id = await self.get_family_location_id(fam.id)
+            zone_count = await self.get_family_zone_count(location_id)
             families.append(schemas.FamilyResponse(
                 id=fam.id, name=fam.name, member_count=member_count,
                 role=role, created_at=fam.created_at,
+                location_id=location_id, zone_count=zone_count,
             ))
         return families
 

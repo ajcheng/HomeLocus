@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.security import get_current_user
+from app.models.user import User
 from app.schemas import space as schemas
 from app.services.space_service import SpaceService
 
@@ -20,8 +22,11 @@ async def create_location(data: schemas.LocationCreate, svc: SpaceService = Depe
 
 
 @router.get("/locations", response_model=list[schemas.LocationResponse])
-async def list_locations(svc: SpaceService = Depends(get_space_service)):
-    return await svc.list_locations()
+async def list_locations(
+    user: User = Depends(get_current_user),
+    svc: SpaceService = Depends(get_space_service),
+):
+    return await svc.list_locations(user_id=user.id)
 
 
 @router.delete("/locations/{location_id}")

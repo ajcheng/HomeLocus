@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import '../app/app_state.dart';
 import '../services/api_client.dart';
 
 class FamilyScreen extends StatefulWidget {
@@ -48,13 +50,76 @@ class _FamilyScreenState extends State<FamilyScreen> {
     );
     if (ok == true && ctrl.text.isNotEmpty) {
       try {
-        await _api.post('/families', body: {'name': ctrl.text});
-        _load();
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('家庭已创建，空间已自动生成')));
+        final created = await _api.post('/families', body: {'name': ctrl.text});
+        await _load();
+        if (mounted && created is Map) {
+          final locId = created['location_id']?.toString() ?? '';
+          final name = created['name']?.toString() ?? ctrl.text;
+          if (locId.isNotEmpty) {
+            context.read<AppState>().openFamilyLocation(locId, name);
+          }
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('家庭已创建，已生成 ${created['zone_count'] ?? 0} 个预设分区，可在「空间」查看'),
+              action: locId.isNotEmpty
+                  ? SnackBarAction(
+                      label: '去空间',
+                      onPressed: () => context.read<AppState>().openFamilyLocation(locId, name),
+                    )
+                  : null,
+            ),
+          );
+        }
       } catch (e) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
       }
     }
+  }
+
+  Future<void> _deleteFamily(String familyId, String familyName) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除家庭'),
+        content: Text('确定删除「$familyName」？将同时删除其预设空间、分区及其中物品，不可恢复。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await _api.delete('/families/$familyId');
+      final app = context.read<AppState>();
+      final fam = _families.cast<Map>().firstWhere(
+        (f) => f['id'] == familyId,
+        orElse: () => <String, dynamic>{},
+      );
+      final locId = fam['location_id']?.toString() ?? '';
+      if (locId.isNotEmpty && app.activeLocationId == locId) {
+        app.setActiveLocation('', '');
+      }
+      await _load();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('家庭已删除')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  void _openFamilySpace(Map f) {
+    final locId = f['location_id']?.toString() ?? '';
+    if (locId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('该家庭暂无关联空间，可在空间页新建地点')),
+      );
+      return;
+    }
+    context.read<AppState>().openFamilyLocation(locId, f['name']?.toString() ?? '');
   }
 
   Future<void> _joinFamily() async {
@@ -197,6 +262,7 @@ class _FamilyScreenState extends State<FamilyScreen> {
                     itemCount: _families.length,
                     itemBuilder: (_, i) {
                       final f = _families[i];
+                      final zoneCount = f['zone_count'] ?? 0;
                       return Card(
                         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                         child: ListTile(
@@ -205,9 +271,33 @@ class _FamilyScreenState extends State<FamilyScreen> {
                             child: Icon(f['role'] == 'admin' ? Icons.admin_panel_settings : Icons.person, color: Colors.blue),
                           ),
                           title: Text(f['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text('${f['member_count']} 人 | ${f['role'] == 'admin' ? '管理员' : '成员'} | 含预设空间'),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => _viewMembers(f['id'], f['role'], f['name']),
+                          subtitle: Text(
+                            '${f['member_count']} 人 | ${f['role'] == 'admin' ? '管理员' : '成员'} | 预设 $zoneCount 个分区',
+                          ),
+                          trailing: PopupMenuButton<String>(
+                            onSelected: (v) {
+                              if (v == 'space') _openFamilySpace(f);
+                              if (v == 'members') _viewMembers(f['id'], f['role'], f['name']);
+                              if (v == 'delete' && f['role'] == 'admin') {
+                                _deleteFamily(f['id'], f['name'] ?? '');
+                              }
+                            },
+                            itemBuilder: (ctx) => [
+                              const PopupMenuItem(value: 'space', child: ListTile(leading: Icon(Icons.home_work), title: Text('查看空间'), dense: true)),
+                              const PopupMenuItem(value: 'members', child: ListTile(leading: Icon(Icons.people), title: Text('成员管理'), dense: true)),
+                              if (f['role'] == 'admin')
+                                const PopupMenuItem(
+                                  value: 'delete',
+                                  child: ListTile(
+                                    leading: Icon(Icons.delete_outline, color: Colors.red),
+                                    title: Text('删除家庭', style: TextStyle(color: Colors.red)),
+                                    dense: true,
+                                  ),
+                                ),
+                            ],
+                          ),
+                          onTap: () => _openFamilySpace(f),
+                          onLongPress: () => _viewMembers(f['id'], f['role'], f['name']),
                         ),
                       );
                     },

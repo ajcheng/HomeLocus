@@ -16,6 +16,8 @@ class LocationResponse(BaseModel):
     is_default: bool
     created_at: datetime
     zone_count: int = 0
+    family_id: Optional[str] = None
+    family_name: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

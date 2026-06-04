@@ -52,6 +52,12 @@ class AppState extends ChangeNotifier {
   }
 
   /// Switch to space tab and expand the given zone (from floor plan).
+  void openFamilyLocation(String locationId, String locationName) {
+    setActiveLocation(locationId, locationName);
+    _homeTabIndex = 0;
+    notifyListeners();
+  }
+
   void openZoneInSpace(String zoneId, {String? locationId, String? locationName}) {
     _focusZoneId = zoneId;
     _focusSlotId = null;

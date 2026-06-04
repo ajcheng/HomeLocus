@@ -28,8 +28,11 @@ async def create_family(
 ):
     family = await svc.create_family(user, data.name)
     await audit.log(user.id, user.username, "family_created", "family", family.id, f"创建家庭: {data.name}")
+    location_id = getattr(family, "_location_id", None) or await svc.get_family_location_id(family.id)
+    zone_count = await svc.get_family_zone_count(location_id)
     return schemas.FamilyResponse(
         id=family.id, name=family.name, member_count=1, role="admin", created_at=family.created_at,
+        location_id=location_id, zone_count=zone_count,
     )
 
 
@@ -39,6 +42,22 @@ async def list_families(
     svc: FamilyService = Depends(get_family_service),
 ):
     return await svc.list_families(user)
+
+
+@router.delete("/{family_id}")
+async def delete_family(
+    family_id: str,
+    user: User = Depends(get_current_user),
+    svc: FamilyService = Depends(get_family_service),
+    audit: AuditService = Depends(get_audit_service),
+):
+    if not await svc.check_admin(user, family_id):
+        raise HTTPException(status_code=403, detail="Only family admin can delete the family")
+    ok = await svc.delete_family(family_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Family not found")
+    await audit.log(user.id, user.username, "family_deleted", "family", family_id, "删除家庭及关联空间")
+    return {"status": "deleted"}
 
 
 @router.get("/{family_id}/members", response_model=list[schemas.MemberResponse])
@@ -137,7 +156,10 @@ async def join_family(
         raise HTTPException(status_code=404, detail="Invalid or expired invitation code")
 
     await audit.log(user.id, user.username, "member_joined", "family", family.id, f"通过邀请码加入", family_id=family.id)
+    location_id = await svc.get_family_location_id(family.id)
+    zone_count = await svc.get_family_zone_count(location_id)
     return schemas.FamilyResponse(
         id=family.id, name=family.name, member_count=len(family.members),
         role="member", created_at=family.created_at,
+        location_id=location_id, zone_count=zone_count,
     )

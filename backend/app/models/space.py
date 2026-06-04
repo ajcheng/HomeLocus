@@ -15,6 +15,9 @@ class Location(Base):
     id: Mapped[str] = mapped_column(String(50), primary_key=True, default=lambda: f"loc_{uuid.uuid4().hex[:8]}")
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    family_id: Mapped[Optional[str]] = mapped_column(
+        String(50), ForeignKey("families.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

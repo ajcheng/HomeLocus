@@ -37,7 +37,9 @@ class _SpaceScreenState extends State<SpaceScreen> {
       setState(() { _locations = list; });
       if (list.isNotEmpty && mounted) {
         final app = context.read<AppState>();
-        if (app.activeLocationId.isEmpty) {
+        final activeId = app.activeLocationId;
+        final stillValid = activeId.isNotEmpty && list.any((l) => l['id'] == activeId);
+        if (!stillValid) {
           app.setActiveLocation(list[0]['id'], list[0]['name'] ?? '');
         }
       }
@@ -147,9 +149,6 @@ class _SpaceScreenState extends State<SpaceScreen> {
     }
 
     final activeId = app.activeLocationId;
-    final filtered = activeId.isEmpty
-        ? _locations
-        : _locations.where((l) => l['id'] == activeId).toList();
 
     return Scaffold(
       appBar: AppBar(title: const Text('空间管理'), actions: [
@@ -217,13 +216,11 @@ class _SpaceScreenState extends State<SpaceScreen> {
                         Expanded(
                           child: RefreshIndicator(
                             onRefresh: _load,
-                            child: filtered.isEmpty
-                                ? const Center(child: Text('请选择地点'))
-                                : ListView.builder(
+                            child: ListView.builder(
                                     padding: const EdgeInsets.only(bottom: 80),
-                                    itemCount: filtered.length,
+                                    itemCount: _locations.length,
                                     itemBuilder: (_, i) {
-                                      final loc = filtered[i];
+                                      final loc = _locations[i];
                                       return _LocationTile(
                                         loc: loc,
                                         api: _api,
@@ -275,6 +272,14 @@ class _LocationTile extends StatefulWidget {
 
 class _LocationTileState extends State<_LocationTile> {
   List<dynamic>? _zones;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initiallyExpanded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadZones());
+    }
+  }
 
   Future<void> _loadZones() async {
     if (_zones != null) return;
@@ -341,7 +346,11 @@ class _LocationTileState extends State<_LocationTile> {
         initiallyExpanded: widget.initiallyExpanded,
         leading: const Icon(Icons.location_city, color: Colors.blue),
         title: Text(widget.loc['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text('${widget.loc['zone_count'] ?? 0} 个分区'),
+        subtitle: Text(
+          widget.loc['family_name'] != null
+              ? '家庭：${widget.loc['family_name']} · ${widget.loc['zone_count'] ?? 0} 个分区'
+              : '${widget.loc['zone_count'] ?? 0} 个分区',
+        ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -402,6 +411,14 @@ class _ZoneTile extends StatefulWidget {
 
 class _ZoneTileState extends State<_ZoneTile> {
   List<dynamic>? _containers;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initiallyExpanded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadContainers());
+    }
+  }
 
   Future<void> _loadContainers() async {
     if (_containers != null) return;

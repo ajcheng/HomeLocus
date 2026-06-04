@@ -1,7 +1,8 @@
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.family import Family, FamilyMember
 from app.models.space import Location, Zone, Container, Slot
 from app.schemas import space as schemas
 from app.services.space_templates import HOME_SPACE_TEMPLATE
@@ -19,16 +20,26 @@ class SpaceService:
         await self.db.refresh(location)
         return location
 
-    async def list_locations(self) -> list[dict]:
-        result = await self.db.execute(
+    async def list_locations(self, user_id: str | None = None) -> list[dict]:
+        stmt = (
             select(
                 Location,
-                func.count(Zone.id).label("zone_count")
+                func.count(Zone.id).label("zone_count"),
+                Family.name.label("family_name"),
             )
             .outerjoin(Zone, Zone.location_id == Location.id)
-            .group_by(Location.id)
-            .order_by(Location.is_default.desc(), Location.created_at)
+            .outerjoin(Family, Family.id == Location.family_id)
+            .group_by(Location.id, Family.name)
         )
+        if user_id:
+            fam_ids_subq = (
+                select(FamilyMember.family_id).where(FamilyMember.user_id == user_id)
+            )
+            stmt = stmt.where(
+                or_(Location.family_id.is_(None), Location.family_id.in_(fam_ids_subq))
+            )
+        stmt = stmt.order_by(Location.is_default.desc(), Location.created_at)
+        result = await self.db.execute(stmt)
         rows = result.all()
         return [
             schemas.LocationResponse(
@@ -37,6 +48,8 @@ class SpaceService:
                 is_default=row.Location.is_default,
                 created_at=row.Location.created_at,
                 zone_count=row.zone_count,
+                family_id=row.Location.family_id,
+                family_name=row.family_name,
             )
             for row in rows
         ]

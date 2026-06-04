@@ -14,6 +14,8 @@ class FamilyResponse(BaseModel):
     member_count: int = 0
     role: str = "member"
     created_at: datetime
+    location_id: Optional[str] = None
+    zone_count: int = 0
 
     model_config = {"from_attributes": True}
 
