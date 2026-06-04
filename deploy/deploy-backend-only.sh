@@ -22,6 +22,7 @@ fi
 echo "=== 2. 导出 backend 镜像 ==="
 mkdir -p "$IMAGES_DIR"
 sudo docker save homelocus-backend:latest -o "$IMAGE_TAR"
+sudo chown "$(whoami):$(whoami)" "$IMAGE_TAR"
 echo "镜像大小: $(ls -lh "$IMAGE_TAR" | awk '{print $5}')"
 
 echo "=== 3. 传输到生产 nginx ==="
