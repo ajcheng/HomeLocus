@@ -48,6 +48,8 @@ def check_pending_reminders():
             rows = result.all()
             count = len(rows)
             if count > 0:
+                from app.services.notification_service import notification_service
+
                 logger.info(f"Found {count} pending reminders:")
                 for reminder, item in rows:
                     logger.info(
@@ -55,6 +57,15 @@ def check_pending_reminders():
                         f"due {reminder.next_remind_at.isoformat()}"
                         f"{' — ' + (reminder.notes or '')}"
                     )
+                    user_id = "system"
+                    if reminder.reminder_type == "charge":
+                        await notification_service.notify_charge_reminder(
+                            user_id, item.label, item.charge_cycle_days or 90
+                        )
+                    elif reminder.reminder_type == "borrow":
+                        await notification_service.notify_borrow_return(
+                            user_id, item.label, item.borrower or "未知"
+                        )
             return count
 
     try:

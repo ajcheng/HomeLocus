@@ -530,6 +530,68 @@ class _SlotItemsTileState extends State<_SlotItemsTile> {
     setState(() => _loading = false);
   }
 
+  Future<void> _markReturned(String itemId, String label) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('归位「$label」'),
+        content: const Text('确认该物品已归还？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('已归位')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await widget.api.post('/reminders/borrow/return', body: {'item_id': itemId});
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已标记归位')));
+      }
+      setState(() => _items = null);
+      await _loadItems();
+      widget.onChanged();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  void _showItemActions(dynamic it) {
+    final borrowed = it['is_borrowed'] == true;
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(it['label'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: borrowed && it['borrower'] != null ? Text('借给：${it['borrower']}') : null,
+            ),
+            if (borrowed)
+              ListTile(
+                leading: const Icon(Icons.undo, color: Colors.green),
+                title: const Text('标记已归位'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _markReturned(it['id'], it['label'] ?? '');
+                },
+              )
+            else
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.orange),
+                title: const Text('标记借出'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _markBorrowed(it['id'], it['label'] ?? '');
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _markBorrowed(String itemId, String label) async {
     final borrowerCtrl = TextEditingController();
     final ok = await showDialog<bool>(
@@ -671,7 +733,12 @@ class _SlotItemsTileState extends State<_SlotItemsTile> {
                     ].join(' · '),
                     style: const TextStyle(fontSize: 11),
                   ),
-                  onLongPress: () => _markBorrowed(it['id'], it['label'] ?? ''),
+                  trailing: Icon(
+                    it['is_borrowed'] == true ? Icons.logout : Icons.more_horiz,
+                    size: 16,
+                    color: it['is_borrowed'] == true ? Colors.orange : Colors.grey,
+                  ),
+                  onTap: () => _showItemActions(it),
                 ),
             ListTile(
               dense: true,
