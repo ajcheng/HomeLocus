@@ -30,6 +30,9 @@ class Item(Base):
     is_borrowed: Mapped[bool] = mapped_column(Boolean, default=False)
     borrower: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
+    # False until user confirms on recognition screen; manual add is True
+    is_confirmed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
     # AI recognition metadata
     confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     ai_label_raw: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)

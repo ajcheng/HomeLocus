@@ -236,6 +236,7 @@ class SpeechService:
 
     async def add_item_from_speech(self, parsed: ParsedItem, slot_id: str) -> Item:
         item = Item(
+            is_confirmed=True,
             slot_id=slot_id,
             label=parsed.label,
             brand=parsed.brand,

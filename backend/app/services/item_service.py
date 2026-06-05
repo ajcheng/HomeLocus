@@ -58,22 +58,6 @@ class ItemService:
             raise ValueError(f"Task {task_id} not found")
 
         snapshot.ai_response_raw = {"items": items_data}
-        for item_data in items_data:
-            item_kwargs = dict(
-                slot_id=snapshot.slot_id,
-                label=item_data.get("label", "unknown"),
-                brand=item_data.get("brand"),
-                tags=item_data.get("tags", []),
-                bounding_box=item_data.get("bounding_box"),
-                thumbnail_path=item_data.get("thumbnail_path"),
-                confidence=item_data.get("confidence"),
-                ai_label_raw=item_data.get("label"),
-                category=item_data.get("category"),
-            )
-            if item_data.get("id"):
-                item_kwargs["id"] = item_data["id"]
-            item = Item(**item_kwargs)
-            self.db.add(item)
         await self.db.commit()
         return snapshot
 
@@ -92,9 +76,12 @@ class ItemService:
                 ai_label_raw=data.confirmed_label,
                 is_chargeable=data.is_chargeable_device,
                 charge_cycle_days=data.charge_reminder_cycle_days,
+                is_confirmed=True,
             )
             self.db.add(item)
         else:
+            if item.is_confirmed:
+                return item
             item.label = data.confirmed_label
             if data.bounding_box:
                 item.bounding_box = data.bounding_box
@@ -108,6 +95,7 @@ class ItemService:
                 item.confidence = data.confidence
             item.is_chargeable = data.is_chargeable_device
             item.charge_cycle_days = data.charge_reminder_cycle_days
+            item.is_confirmed = True
         await self.db.commit()
         await self.db.refresh(item)
         await SearchService(self.db).index_item_record(item)
@@ -120,6 +108,18 @@ class ItemService:
             )
         return item
 
+    async def confirm_items_batch(
+        self, slot_id: str, items: list[schemas.ConfirmItemRequest]
+    ) -> list[Item]:
+        confirmed: list[Item] = []
+        for data in items:
+            data.slot_id = slot_id
+            item_id = data.item_id or f"item_{uuid.uuid4().hex[:8]}"
+            item = await self.confirm_item(item_id, data)
+            if item:
+                confirmed.append(item)
+        return confirmed
+
     async def create_manual_item(self, data: schemas.ManualItemCreate) -> Item:
         item = Item(
             slot_id=data.slot_id,
@@ -128,6 +128,7 @@ class ItemService:
             category=data.category,
             is_chargeable=data.is_chargeable_device,
             charge_cycle_days=data.charge_reminder_cycle_days,
+            is_confirmed=True,
         )
         self.db.add(item)
         await self.db.commit()
@@ -145,7 +146,7 @@ class ItemService:
     async def get_slot_items(self, slot_id: str) -> list[Item]:
         stmt = (
             select(Item)
-            .where(Item.slot_id == slot_id)
+            .where(Item.slot_id == slot_id, Item.is_confirmed == True)
             .order_by(Item.updated_at.desc())
         )
         result = await self.db.execute(stmt)

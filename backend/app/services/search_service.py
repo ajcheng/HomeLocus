@@ -44,10 +44,14 @@ class SearchService:
         item_ids = [h["id"] for h in hits if h.get("id")]
         if item_ids:
             enriched = await self._enrich_breadcrumbs(item_ids)
-            # Merge enriched data into hits
+            filtered: list[dict] = []
             for hit in hits:
-                extra = enriched.get(hit["id"], {})
+                extra = enriched.get(hit["id"])
+                if not extra:
+                    continue
                 hit.update(extra)
+                filtered.append(hit)
+            return filtered[:limit]
 
         return hits
 
@@ -59,7 +63,7 @@ class SearchService:
             .join(Container, Slot.container_id == Container.id)
             .join(Zone, Container.zone_id == Zone.id)
             .join(Location, Zone.location_id == Location.id)
-            .where(Item.id.in_(item_ids))
+            .where(Item.id.in_(item_ids), Item.is_confirmed == True)
         )
         result = await self.db.execute(stmt)
         rows = result.all()
@@ -91,7 +95,9 @@ class SearchService:
         return result.scalar_one_or_none() or ""
 
     async def index_item_record(self, item: Item) -> None:
-        """Index a DB item into Meilisearch after add/confirm."""
+        """Index a DB item into Meilisearch after user confirms."""
+        if not item.is_confirmed:
+            return
         location_id = await self._location_id_for_slot(item.slot_id)
         tags = item.tags if isinstance(item.tags, list) else []
         search_engine.index_text(
@@ -106,7 +112,7 @@ class SearchService:
 
     async def reindex_all_items(self) -> int:
         """Rebuild Meilisearch index from all items in DB."""
-        result = await self.db.execute(select(Item))
+        result = await self.db.execute(select(Item).where(Item.is_confirmed == True))
         items = list(result.scalars().all())
         for item in items:
             await self.index_item_record(item)
@@ -135,12 +141,13 @@ class SearchService:
             .join(Zone, Container.zone_id == Zone.id)
             .join(Location, Zone.location_id == Location.id)
             .where(
+                Item.is_confirmed == True,
                 or_(
                     Item.label.ilike(pattern),
                     Item.brand.ilike(pattern),
                     Item.category.ilike(pattern),
                     Item.ai_label_raw.ilike(pattern),
-                )
+                ),
             )
         )
         if location_id:
@@ -172,6 +179,7 @@ class SearchService:
             .join(Zone, Container.zone_id == Zone.id)
             .join(Location, Zone.location_id == Location.id)
         )
+        stmt = stmt.where(Item.is_confirmed == True)
         if location_id:
             stmt = stmt.where(Location.id == location_id)
         stmt = stmt.order_by(Item.updated_at.desc()).limit(limit)

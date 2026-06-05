@@ -4,9 +4,15 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+class BatchConfirmRequest(BaseModel):
+    slot_id: str
+    items: list["ConfirmItemRequest"]
+
+
 class ConfirmItemRequest(BaseModel):
     confirmed_label: str = Field(..., max_length=200)
     slot_id: str = Field(..., max_length=50)
+    item_id: Optional[str] = None
     bounding_box: Optional[dict] = None
     brand: Optional[str] = None
     category: Optional[str] = None

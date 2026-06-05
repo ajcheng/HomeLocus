@@ -111,6 +111,16 @@ async def confirm_item(
     return svc.item_to_response(item)
 
 
+@router.post("/confirm-batch", response_model=list[schemas.ItemResponse])
+async def confirm_items_batch(
+    data: schemas.BatchConfirmRequest,
+    svc: ItemService = Depends(get_item_service),
+):
+    """批量确认入库（仅用户选中的识别结果）。"""
+    items = await svc.confirm_items_batch(data.slot_id, data.items)
+    return [svc.item_to_response(i) for i in items]
+
+
 @router.get("/history/{slot_id}", response_model=list[schemas.HistorySnapshotResponse])
 async def get_slot_history(slot_id: str, svc: ItemService = Depends(get_item_service)):
     snapshots = await svc.get_slot_history(slot_id)

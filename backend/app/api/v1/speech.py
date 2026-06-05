@@ -79,6 +79,23 @@ async def speech_add_item_text(
     )
 
 
+@router.post("/transcribe")
+async def speech_transcribe(
+    audio: UploadFile = File(...),
+    svc: SpeechService = Depends(get_speech_service),
+):
+    """仅语音转文字，供搜索页语音输入使用。"""
+    suffix = os.path.splitext(audio.filename or "recording.m4a")[1] or ".m4a"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(await audio.read())
+        tmp_path = tmp.name
+    try:
+        text = await svc.transcribe(tmp_path)
+        return {"text": text or ""}
+    finally:
+        os.unlink(tmp_path)
+
+
 @router.post("/add-item/confirm")
 async def confirm_speech_item(
     data: schemas.ConfirmedSpeechItem,
