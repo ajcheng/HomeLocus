@@ -1,11 +1,12 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.item import Item, ImageSnapshot
+from app.models.reminder import Reminder
 from app.models.space import Slot
 from app.schemas import item as schemas
 from app.schemas import reminder as reminder_schemas
@@ -142,6 +143,17 @@ class ItemService:
                 )
             )
         return item
+
+    async def delete_item(self, item_id: str) -> bool:
+        item = await self.db.get(Item, item_id)
+        if not item:
+            return False
+        await self.db.execute(delete(Reminder).where(Reminder.item_id == item_id))
+        await self.db.execute(delete(ImageSnapshot).where(ImageSnapshot.item_id == item_id))
+        await self.db.delete(item)
+        await self.db.commit()
+        SearchService(self.db).delete_item_index(item_id)
+        return True
 
     async def get_slot_items(self, slot_id: str) -> list[Item]:
         stmt = (

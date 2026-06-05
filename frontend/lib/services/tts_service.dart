@@ -1,6 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
-/// 搜索结果语音播报（适合老年人）
+/// 搜索结果语音播报（本机 TTS，无需联网 API）
 class TtsService {
   static final TtsService _instance = TtsService._();
   factory TtsService() => _instance;
@@ -8,27 +9,58 @@ class TtsService {
 
   final FlutterTts _tts = FlutterTts();
   bool _ready = false;
+  String? _lastError;
 
-  Future<void> _ensureReady() async {
-    if (_ready) return;
-    await _tts.setLanguage('zh-CN');
-    await _tts.setSpeechRate(0.45);
-    await _tts.setVolume(1.0);
-    await _tts.setPitch(1.0);
-    _ready = true;
+  String? get lastError => _lastError;
+
+  Future<bool> ensureReady() async {
+    if (_ready) return true;
+    _lastError = null;
+    try {
+      await _tts.awaitSpeakCompletion(true);
+      final langs = await _tts.getLanguages;
+      String? picked;
+      for (final code in ['zh-CN', 'zh_CN', 'cmn-cn', 'zh-TW', 'zh']) {
+        if (langs.contains(code)) {
+          picked = code;
+          break;
+        }
+      }
+      if (picked == null && langs.isNotEmpty) {
+        picked = langs.firstWhere((l) => l.toLowerCase().contains('zh'), orElse: () => langs.first);
+      }
+      if (picked != null) {
+        await _tts.setLanguage(picked);
+      }
+      await _tts.setSpeechRate(0.45);
+      await _tts.setVolume(1.0);
+      await _tts.setPitch(1.0);
+      _ready = true;
+      return true;
+    } catch (e) {
+      _lastError = '$e';
+      debugPrint('TTS init failed: $e');
+      return false;
+    }
   }
 
-  Future<void> speak(String text) async {
-    if (text.trim().isEmpty) return;
-    await _ensureReady();
-    await _tts.stop();
-    await _tts.speak(text);
+  Future<bool> speak(String text) async {
+    if (text.trim().isEmpty) return false;
+    final ok = await ensureReady();
+    if (!ok) return false;
+    try {
+      await _tts.stop();
+      final result = await _tts.speak(text);
+      return result == 1;
+    } catch (e) {
+      _lastError = '$e';
+      return false;
+    }
   }
 
-  Future<void> speakSearchResults(List<dynamic> results, {String? query}) async {
+  Future<bool> speakSearchResults(List<dynamic> results, {String? query}) async {
     if (results.isEmpty) {
-      await speak(query != null && query.isNotEmpty ? '没有找到与$query相关的物品' : '没有找到相关物品');
-      return;
+      return speak(query != null && query.isNotEmpty ? '没有找到与$query相关的物品' : '没有找到相关物品');
     }
     final buf = StringBuffer();
     if (query != null && query.isNotEmpty) {
@@ -49,7 +81,7 @@ class TtsService {
     if (results.length > 8) {
       buf.write('其余${results.length - 8}个请查看屏幕。');
     }
-    await speak(buf.toString());
+    return speak(buf.toString());
   }
 
   Future<void> stop() => _tts.stop();

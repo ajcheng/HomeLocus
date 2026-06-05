@@ -3,6 +3,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.family import Family, FamilyMember
+from app.models.floor_plan import FloorPlan
+from app.models.item import ImageSnapshot, Item
+from app.models.reminder import Reminder
 from app.models.space import Location, Zone, Container, Slot
 from app.schemas import space as schemas
 from app.services.space_templates import HOME_SPACE_TEMPLATE
@@ -58,9 +61,40 @@ class SpaceService:
         return await self.db.get(Location, location_id)
 
     async def delete_location(self, location_id: str) -> bool:
-        loc = await self.db.get(Location, location_id)
+        """删除地点及下属分区/物品；先清理平面图与快照等外键依赖。"""
+        result = await self.db.execute(
+            select(Location)
+            .where(Location.id == location_id)
+            .options(
+                selectinload(Location.zones)
+                .selectinload(Zone.containers)
+                .selectinload(Container.slots)
+            )
+        )
+        loc = result.scalar_one_or_none()
         if not loc:
             return False
+
+        slot_ids: list[str] = []
+        for zone in loc.zones:
+            for container in zone.containers:
+                slot_ids.extend(s.id for s in container.slots)
+
+        if slot_ids:
+            item_rows = await self.db.execute(
+                select(Item.id).where(Item.slot_id.in_(slot_ids))
+            )
+            item_ids = [r[0] for r in item_rows.all()]
+            if item_ids:
+                await self.db.execute(delete(Reminder).where(Reminder.item_id.in_(item_ids)))
+            await self.db.execute(delete(ImageSnapshot).where(ImageSnapshot.slot_id.in_(slot_ids)))
+
+        fp_rows = await self.db.execute(
+            select(FloorPlan).where(FloorPlan.location_id == location_id)
+        )
+        for fp in fp_rows.scalars().all():
+            await self.db.delete(fp)
+
         await self.db.delete(loc)
         await self.db.commit()
         return True

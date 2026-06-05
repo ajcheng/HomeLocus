@@ -91,7 +91,12 @@ async def speech_transcribe(
         tmp_path = tmp.name
     try:
         text = await svc.transcribe(tmp_path)
-        return {"text": text or ""}
+        if not text:
+            raise HTTPException(
+                status_code=503,
+                detail="语音识别失败：请确认生产环境已配置 AI_API_KEY，且 AI 服务支持 Whisper 接口 /v1/audio/transcriptions",
+            )
+        return {"text": text}
     finally:
         os.unlink(tmp_path)
 

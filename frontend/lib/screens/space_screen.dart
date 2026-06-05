@@ -639,10 +639,49 @@ class _SlotItemsTileState extends State<_SlotItemsTile> {
                   _markBorrowed(it['id'], it['label'] ?? '');
                 },
               ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: const Text('删除物品', style: TextStyle(color: Colors.red)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _deleteItem(it['id'], it['label'] ?? '');
+              },
+            ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _deleteItem(String itemId, String label) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除物品'),
+        content: Text('确定删除「$label」？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await widget.api.delete('/items/$itemId');
+      if (mounted) {
+        context.read<AppState>().refreshSearchItems();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已删除 $label')));
+      }
+      setState(() => _items = null);
+      await _loadItems();
+      widget.onChanged();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
   }
 
   Future<void> _markBorrowed(String itemId, String label) async {

@@ -89,6 +89,14 @@ async def list_slot_items(slot_id: str, svc: ItemService = Depends(get_item_serv
     return [svc.item_to_response(i) for i in items]
 
 
+@router.delete("/{item_id}")
+async def delete_item(item_id: str, svc: ItemService = Depends(get_item_service)):
+    ok = await svc.delete_item(item_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return {"status": "deleted", "item_id": item_id}
+
+
 @router.post("/manual", response_model=schemas.ItemResponse, status_code=201)
 async def create_manual_item(
     data: schemas.ManualItemCreate,

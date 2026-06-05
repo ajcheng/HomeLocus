@@ -1,11 +1,9 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
-import 'package:record/record.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 
 import '../app/app_state.dart';
 import '../services/api_client.dart';
@@ -21,7 +19,7 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final _api = ApiClient();
   final _ctrl = TextEditingController();
-  final _recorder = AudioRecorder();
+  final _speech = SpeechToText();
   final _tts = TtsService();
 
   List<dynamic> _results = [];
@@ -30,12 +28,12 @@ class _SearchScreenState extends State<SearchScreen> {
   String? _selectedCategory;
   bool _loading = false;
   bool _loadingRecent = false;
-  bool _isRecording = false;
+  bool _isListening = false;
+  bool _speechReady = false;
   bool _hasSearched = false;
   String? _error;
   int _loadedListVersion = -1;
-  Timer? _recordTimer;
-  int _recordSeconds = 0;
+  String _voicePartial = '';
 
   final _suggestions = ['鼠标', '充电', '保暖', '发票', '工具', '药品', '冬季', '相机'];
 
@@ -45,15 +43,46 @@ class _SearchScreenState extends State<SearchScreen> {
     _loadedListVersion = context.read<AppState>().searchListVersion;
     _loadRecentItems();
     _loadCategories();
+    _initSpeech();
+  }
+
+  Future<void> _initSpeech() async {
+    _speechReady = await _speech.initialize(
+      onError: (e) => debugPrint('speech error: $e'),
+      onStatus: (s) => debugPrint('speech status: $s'),
+    );
   }
 
   @override
   void dispose() {
-    _recordTimer?.cancel();
-    _recorder.dispose();
+    _speech.stop();
     _ctrl.dispose();
     _tts.stop();
     super.dispose();
+  }
+
+  Future<void> _speakWithFeedback(String text) async {
+    final ok = await _tts.speak(text);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _tts.lastError != null
+                ? '语音播报失败，请检查系统是否已安装中文语音引擎'
+                : '语音播报失败',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _speakResults(List<dynamic> results, {String? query}) async {
+    final ok = await _tts.speakSearchResults(results, query: query);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('无法播报：请在系统设置中启用文字转语音（TTS）中文引擎')),
+      );
+    }
   }
 
   Future<void> _loadCategories() async {
@@ -100,8 +129,10 @@ class _SearchScreenState extends State<SearchScreen> {
       final fields = <String, String>{};
       if (locId.isNotEmpty) fields['location_id'] = locId;
       final data = await _api.uploadMultipart('/search/by-image', File(picked.path), fields: fields);
-      setState(() { _results = (data['results'] as List?) ?? []; });
-      await _tts.speakSearchResults(_results, query: '图片中的物品');
+      final results = (data['results'] as List?) ?? [];
+      if (!mounted) return;
+      setState(() => _results = results);
+      await _speakResults(results, query: '图片中的物品');
     } catch (e) {
       setState(() { _error = '$e'; _results = []; });
     }
@@ -109,71 +140,80 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _toggleVoiceSearch() async {
-    if (_isRecording) {
-      await _stopVoiceSearch();
-    } else {
-      await _startVoiceSearch();
+    if (_isListening) {
+      await _speech.stop();
+      setState(() => _isListening = false);
+      return;
     }
-  }
-
-  Future<void> _startVoiceSearch() async {
-    final hasPerm = await _recorder.hasPermission();
-    if (!hasPerm) {
+    if (!_speechReady) {
+      await _initSpeech();
+    }
+    if (!_speechReady) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('需要麦克风权限才能语音搜索')),
+          const SnackBar(content: Text('本机语音识别不可用，请检查麦克风权限与 Google 语音服务')),
         );
       }
       return;
     }
-    final dir = await getTemporaryDirectory();
-    final path = '${dir.path}/search_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
     setState(() {
-      _isRecording = true;
-      _recordSeconds = 0;
+      _isListening = true;
+      _voicePartial = '';
     });
-    await _recorder.start(
-      const RecordConfig(encoder: AudioEncoder.aacLc, sampleRate: 16000),
-      path: path,
+    final locales = await _speech.locales();
+    final zhMatches = locales.where((l) => l.localeId.toLowerCase().startsWith('zh')).toList();
+    final zhLocale = zhMatches.isNotEmpty ? zhMatches.first : (locales.isNotEmpty ? locales.first : null);
+    await _speech.listen(
+      localeId: zhLocale?.localeId,
+      listenFor: const Duration(seconds: 12),
+      pauseFor: const Duration(seconds: 2),
+      onResult: (r) {
+        if (!mounted) return;
+        setState(() => _voicePartial = r.recognizedWords);
+        if (r.finalResult && r.recognizedWords.trim().isNotEmpty) {
+          _ctrl.text = r.recognizedWords.trim();
+          _search(r.recognizedWords.trim(), speakAfter: true);
+          setState(() => _isListening = false);
+        }
+      },
+      onSoundLevelChange: null,
+      cancelOnError: true,
     );
-    _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() => _recordSeconds++);
-    });
-    Future.delayed(const Duration(seconds: 15), () {
-      if (_isRecording && mounted) _stopVoiceSearch(expectedPath: path);
-    });
   }
 
-  Future<void> _stopVoiceSearch({String? expectedPath}) async {
-    _recordTimer?.cancel();
-    final path = await _recorder.stop() ?? expectedPath;
-    setState(() => _isRecording = false);
-    if (path == null || !File(path).existsSync()) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('录音失败，请重试')),
-        );
-      }
-      return;
-    }
-    setState(() { _loading = true; _error = null; });
+  Future<void> _deleteRecentItem(dynamic r) async {
+    final id = r['id']?.toString() ?? '';
+    final label = r['item_label'] ?? '';
+    if (id.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除物品'),
+        content: Text('确定删除「$label」？将从搜索与空间中移除，不可恢复。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
     try {
-      final data = await _api.uploadAudio('/speech/transcribe', File(path), timeoutSeconds: 60);
-      final text = (data['text'] ?? '').toString().trim();
-      if (text.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('未识别到语音，请再说一次')),
-          );
-        }
-      } else {
-        _ctrl.text = text;
-        await _search(text, speakAfter: true);
+      await _api.delete('/items/$id');
+      context.read<AppState>().refreshSearchItems();
+      await _loadRecentItems();
+      if (_ctrl.text == label) {
+        setState(() { _results = []; _hasSearched = false; });
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已删除 $label')));
       }
     } catch (e) {
-      setState(() => _error = '$e');
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     }
-    if (mounted) setState(() => _loading = false);
   }
 
   void _openInSpace(dynamic result) {
@@ -232,7 +272,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   child: OutlinedButton.icon(
                     onPressed: () {
                       Navigator.pop(ctx);
-                      _tts.speak(
+                      _speakWithFeedback(
                         '${r['item_label'] ?? ''}，放在${r['breadcrumb'] ?? ''}',
                       );
                     },
@@ -240,7 +280,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     label: const Text('朗读'),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
                 Expanded(
                   child: FilledButton.icon(
                     onPressed: () {
@@ -252,6 +292,18 @@ class _SearchScreenState extends State<SearchScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton.icon(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _deleteRecentItem(r);
+                },
+                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                label: const Text('删除此物品', style: TextStyle(color: Colors.red)),
+              ),
             ),
           ],
         ),
@@ -272,7 +324,7 @@ class _SearchScreenState extends State<SearchScreen> {
       });
       setState(() { _results = (data['results'] as List?) ?? []; });
       if (speakAfter) {
-        await _tts.speakSearchResults(_results, query: text);
+        await _speakResults(_results, query: text);
       }
     } catch (e) {
       setState(() { _error = '$e'; _results = []; });
@@ -282,10 +334,10 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Future<void> _speakCurrentResults() async {
     if (_results.isEmpty) {
-      await _tts.speak('当前没有搜索结果');
+      await _speakWithFeedback('当前没有搜索结果');
       return;
     }
-    await _tts.speakSearchResults(_results, query: _ctrl.text.trim());
+    await _speakResults(_results, query: _ctrl.text.trim());
   }
 
   @override
@@ -320,17 +372,17 @@ class _SearchScreenState extends State<SearchScreen> {
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: SearchBar(
               controller: _ctrl,
-              hintText: _isRecording ? '正在听您说…' : '输入或语音说出要找的物品…',
+              hintText: _isListening ? (_voicePartial.isNotEmpty ? _voicePartial : '正在听您说…') : '输入或语音说出要找的物品…',
               onSubmitted: (t) => _search(t),
               leading: Icon(
-                _isRecording ? Icons.mic : Icons.search,
-                color: _isRecording ? Colors.red : null,
+                _isListening ? Icons.mic : Icons.search,
+                color: _isListening ? Colors.red : null,
               ),
               trailing: [
                 IconButton(
-                  icon: Icon(_isRecording ? Icons.stop_circle : Icons.mic_none),
-                  tooltip: _isRecording ? '停止并搜索' : '语音搜索',
-                  color: _isRecording ? Colors.red : null,
+                  icon: Icon(_isListening ? Icons.stop_circle : Icons.mic_none),
+                  tooltip: _isListening ? '停止语音' : '本机语音搜索',
+                  color: _isListening ? Colors.red : null,
                   onPressed: _loading ? null : _toggleVoiceSearch,
                 ),
                 IconButton(
@@ -346,11 +398,11 @@ class _SearchScreenState extends State<SearchScreen> {
               ],
             ),
           ),
-          if (_isRecording)
+          if (_isListening)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Text(
-                '语音搜索中 $_recordSeconds 秒，再次点击麦克风结束',
+                '正在本机识别语音（无需联网），说完自动搜索；点击红色按钮停止',
                 style: TextStyle(color: Colors.red.shade700, fontSize: 13),
               ),
             ),
@@ -388,7 +440,7 @@ class _SearchScreenState extends State<SearchScreen> {
           if (_recentItems.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text('已添加的物品（点击可搜索）', style: Theme.of(context).textTheme.titleSmall),
+              child: Text('已添加的物品（点击搜索，长按删除）', style: Theme.of(context).textTheme.titleSmall),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -399,13 +451,16 @@ class _SearchScreenState extends State<SearchScreen> {
                       runSpacing: 6,
                       children: _recentItems.map((r) {
                         final label = r['item_label'] ?? '';
-                        return ActionChip(
-                          avatar: const Icon(Icons.inventory_2, size: 18),
-                          label: Text(label, overflow: TextOverflow.ellipsis),
-                          onPressed: () {
-                            _ctrl.text = label;
-                            _search(label);
-                          },
+                        return GestureDetector(
+                          onLongPress: () => _deleteRecentItem(r),
+                          child: ActionChip(
+                            avatar: const Icon(Icons.inventory_2, size: 18),
+                            label: Text(label, overflow: TextOverflow.ellipsis),
+                            onPressed: () {
+                              _ctrl.text = label;
+                              _search(label);
+                            },
+                          ),
                         );
                       }).toList(),
                     ),
