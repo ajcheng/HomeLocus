@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     ai_vision_model: str = "deepseek-chat"  # Model with vision support
     asr_model: str = "whisper-1"
 
+    # Image recognition: yolo (local OpenVINO) | vision (cloud API) | auto (yolo then vision)
+    recognition_provider: str = "yolo"
+    yolo_api_url: str = "http://192.168.100.19:8765"
+    yolo_api_key: str = ""
+    yolo_model: str = "yolo11"  # yolo11 | worldv2 | both
+    yolo_conf: float = 0.25
+    yolo_timeout: float = 120.0
+
     # FCM (Firebase Cloud Messaging legacy server key)
     fcm_server_key: str = ""
     reminder_repeat_hours: int = 24

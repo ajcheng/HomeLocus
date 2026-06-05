@@ -2,6 +2,7 @@ import json
 import logging
 import base64
 from io import BytesIO
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -53,7 +54,28 @@ class AIRecognitionService:
     def _prefers_openai_api(self) -> bool:
         return settings.ai_provider in ("openai", "custom")
 
+    def _use_yolo(self) -> bool:
+        provider = (settings.recognition_provider or "yolo").lower()
+        if provider == "vision":
+            return False
+        if not (settings.yolo_api_url or "").strip():
+            return False
+        return provider in ("yolo", "auto")
+
     async def analyze_image(self, image_path: str) -> dict:
+        if self._use_yolo():
+            try:
+                result = await self._analyze_yolo(image_path)
+                if result.get("items") is not None:
+                    return result
+            except Exception as e:
+                logger.warning(f"YOLO recognition failed: {e}")
+                if (settings.recognition_provider or "").lower() == "yolo":
+                    return self._simulate_detection(
+                        image_path,
+                        reason=f"YOLO 不可用: {e}",
+                    )
+
         if not self.api_key:
             return self._simulate_detection(image_path)
 
@@ -176,13 +198,45 @@ class AIRecognitionService:
                     pass
             return {"items": [], "summary": content[:200]}
 
-    def _simulate_detection(self, image_path: str) -> dict:
+    async def _analyze_yolo(self, image_path: str) -> dict:
+        """调用 homelocus-yolo-vision FastAPI（/v1/analyze）。"""
+        base = settings.yolo_api_url.rstrip("/")
+        url = f"{base}/v1/analyze" if not base.endswith("/v1/analyze") else base
+        headers = {}
+        if settings.yolo_api_key:
+            headers["X-API-Key"] = settings.yolo_api_key
+        filename = Path(image_path).name or "image.jpg"
+        data = {
+            "model": settings.yolo_model,
+            "conf": str(settings.yolo_conf),
+            "lang": "zh",
+        }
+        async with httpx.AsyncClient(timeout=settings.yolo_timeout, verify=False) as client:
+            with open(image_path, "rb") as f:
+                files = {"file": (filename, f, "image/jpeg")}
+                response = await client.post(url, files=files, data=data, headers=headers)
+        if response.status_code != 200:
+            raise RuntimeError(f"YOLO API {response.status_code}: {response.text[:300]}")
+        body = response.json()
+        items = body.get("items", [])
+        for item in items:
+            if "label" not in item and item.get("label_zh"):
+                item["label"] = item["label_zh"]
+        return {
+            "items": items,
+            "summary": body.get("summary", ""),
+            "provider": body.get("provider", "yolo"),
+            "detections_zh": body.get("detections_zh"),
+        }
+
+    def _simulate_detection(self, image_path: str, reason: str = "") -> dict:
         try:
             img = Image.open(image_path)
             w, h = img.size
         except Exception:
             w, h = 800, 600
-        return {"items": [], "summary": f"Image size: {w}x{h}. AI recognition not configured."}
+        msg = reason or f"Image size: {w}x{h}. AI recognition not configured."
+        return {"items": [], "summary": msg}
 
     async def _image_to_b64(self, image_path: str) -> str:
         img = Image.open(image_path).convert("RGB")

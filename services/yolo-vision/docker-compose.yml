@@ -1,0 +1,18 @@
+# 本机或 WG 对端运行 YOLO 识别服务
+# 模型目录默认挂载 ~/cursor/yolo-openvino/models
+services:
+  yolo-vision:
+    image: homelocus-yolo-vision:latest
+    build: .
+    ports:
+      # 监听所有接口，供 WireGuard 对端（生产 192.168.100.x）访问
+      - "8765:8765"
+    environment:
+      MODELS_DIR: /models
+      DEFAULT_MODEL: yolo11
+      DEFAULT_DEVICE: ${YOLO_DEVICE:-intel:cpu}
+      DEFAULT_CONF: "0.25"
+      API_KEY: ${YOLO_API_KEY:-}
+    volumes:
+      - ${YOLO_MODELS_HOST:-/home/aj/cursor/yolo-openvino/models}:/models:ro
+    restart: unless-stopped
