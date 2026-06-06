@@ -91,10 +91,31 @@ async def list_slot_items(slot_id: str, svc: ItemService = Depends(get_item_serv
 
 @router.delete("/{item_id}")
 async def delete_item(item_id: str, svc: ItemService = Depends(get_item_service)):
-    ok = await svc.delete_item(item_id)
+    ok = await svc.soft_delete_item(item_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Item not found")
-    return {"status": "deleted", "item_id": item_id}
+    return {"status": "archived", "item_id": item_id}
+
+
+@router.patch("/{item_id}/tags", response_model=schemas.ItemResponse)
+async def update_item_tags(
+    item_id: str,
+    data: schemas.ItemTagsUpdate,
+    svc: ItemService = Depends(get_item_service),
+):
+    item = await svc.update_item_tags(item_id, data.tags)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return svc.item_to_response(item)
+
+
+@router.post("/archive-by-tag")
+async def archive_by_tag(
+    data: schemas.ArchiveByTagRequest,
+    svc: ItemService = Depends(get_item_service),
+):
+    count = await svc.archive_by_tag(data.tag, data.location_id)
+    return {"status": "archived", "tag": data.tag, "count": count}
 
 
 @router.post("/manual", response_model=schemas.ItemResponse, status_code=201)

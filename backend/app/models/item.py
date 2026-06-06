@@ -32,6 +32,9 @@ class Item(Base):
 
     # False until user confirms on recognition screen; manual add is True
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Soft delete — archived items searchable in history mode
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", index=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # AI recognition metadata
     confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

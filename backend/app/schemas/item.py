@@ -44,6 +44,15 @@ class TaskStatusResponse(BaseModel):
     error: Optional[str] = None
 
 
+class ItemTagsUpdate(BaseModel):
+    tags: list[str] = Field(default_factory=list)
+
+
+class ArchiveByTagRequest(BaseModel):
+    tag: str = Field(..., max_length=50)
+    location_id: Optional[str] = None
+
+
 class ItemResponse(BaseModel):
     id: str
     slot_id: str
@@ -57,6 +66,8 @@ class ItemResponse(BaseModel):
     is_borrowed: bool = False
     borrower: Optional[str] = None
     confidence: Optional[float] = None
+    is_deleted: bool = False
+    deleted_at: Optional[datetime] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

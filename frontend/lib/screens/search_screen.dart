@@ -25,7 +25,10 @@ class _SearchScreenState extends State<SearchScreen> {
   List<dynamic> _results = [];
   List<dynamic> _recentItems = [];
   List<String> _categories = [];
+  List<dynamic> _marks = [];
   String? _selectedCategory;
+  String? _selectedTag;
+  bool _includeHistory = false;
   bool _loading = false;
   bool _loadingRecent = false;
   bool _isListening = false;
@@ -43,6 +46,7 @@ class _SearchScreenState extends State<SearchScreen> {
     _loadedListVersion = context.read<AppState>().searchListVersion;
     _loadRecentItems();
     _loadCategories();
+    _loadMarks();
     _initSpeech();
   }
 
@@ -83,6 +87,23 @@ class _SearchScreenState extends State<SearchScreen> {
         const SnackBar(content: Text('无法播报：请在系统设置中启用文字转语音（TTS）中文引擎')),
       );
     }
+  }
+
+  Future<void> _loadMarks() async {
+    try {
+      final locId = context.read<AppState>().activeLocationId;
+      final params = <String>[
+        if (_includeHistory) 'include_history=true',
+        if (locId.isNotEmpty) 'location_id=$locId',
+      ];
+      final path = params.isEmpty ? '/search/marks' : '/search/marks?${params.join('&')}';
+      final data = await _api.get(path);
+      if (mounted) {
+        setState(() {
+          _marks = (data['marks'] as List?) ?? [];
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadCategories() async {
@@ -189,7 +210,7 @@ class _SearchScreenState extends State<SearchScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('删除物品'),
-        content: Text('确定删除「$label」？将从搜索与空间中移除，不可恢复。'),
+        content: Text('确定归档「$label」？将从日常搜索与空间中隐藏，可在「历史记录」中查找。'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
           FilledButton(
@@ -203,13 +224,14 @@ class _SearchScreenState extends State<SearchScreen> {
     if (ok != true) return;
     try {
       await _api.delete('/items/$id');
+      if (!mounted) return;
       context.read<AppState>().refreshSearchItems();
       await _loadRecentItems();
       if (_ctrl.text == label) {
         setState(() { _results = []; _hasSearched = false; });
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已删除 $label')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已归档 $label')));
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
@@ -228,6 +250,50 @@ class _SearchScreenState extends State<SearchScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('已跳转到：${result['breadcrumb'] ?? ''}')),
     );
+  }
+
+  Future<void> _archiveByTag() async {
+    final tag = _selectedTag;
+    if (tag == null || tag.isEmpty || _includeHistory) return;
+    final count = (_marks.firstWhere(
+      (m) => m['tag'] == tag,
+      orElse: () => {'count': 0},
+    )['count'] as num?)?.toInt() ?? 0;
+    if (count == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('没有带「$tag」标记的物品')));
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('完成「$tag」归档'),
+        content: Text('将把 $count 件带「$tag」标记的物品移入历史记录（如已搬回老家/已送出）。确定继续？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('确认归档'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      final locId = context.read<AppState>().activeLocationId;
+      final data = await _api.post('/items/archive-by-tag', body: {
+        'tag': tag,
+        if (locId.isNotEmpty) 'location_id': locId,
+      });
+      final n = data['count'] ?? 0;
+      if (!mounted) return;
+      context.read<AppState>().refreshSearchItems();
+      await _loadRecentItems();
+      await _loadMarks();
+      if (_hasSearched) await _search(_ctrl.text.trim().isEmpty ? tag : _ctrl.text.trim());
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已归档 $n 件物品')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
   }
 
   void _showResultDetail(dynamic r) {
@@ -258,6 +324,27 @@ class _SearchScreenState extends State<SearchScreen> {
                 ),
               ],
             ),
+            if ((r['tags'] as List?)?.isNotEmpty == true) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                children: [
+                  for (final t in (r['tags'] as List))
+                    Chip(
+                      label: Text(t.toString(), style: const TextStyle(fontSize: 12)),
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                ],
+              ),
+            ],
+            if (r['is_deleted'] == true && r['deleted_at'] != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                '已于 ${r['deleted_at'].toString().substring(0, 10)} 归档',
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+              ),
+            ],
             if (r['score'] != null && (r['score'] as num) > 0) ...[
               const SizedBox(height: 8),
               Text(
@@ -280,31 +367,35 @@ class _SearchScreenState extends State<SearchScreen> {
                     label: const Text('朗读'),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      _openInSpace(r);
-                    },
-                    icon: const Icon(Icons.my_location),
-                    label: const Text('查看位置'),
+                if (!_includeHistory && r['is_deleted'] != true) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _openInSpace(r);
+                      },
+                      icon: const Icon(Icons.my_location),
+                      label: const Text('查看位置'),
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: TextButton.icon(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  _deleteRecentItem(r);
-                },
-                icon: const Icon(Icons.delete_outline, color: Colors.red),
-                label: const Text('删除此物品', style: TextStyle(color: Colors.red)),
+            if (!_includeHistory && r['is_deleted'] != true) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _deleteRecentItem(r);
+                  },
+                  icon: const Icon(Icons.delete_outline, color: Colors.red),
+                  label: const Text('归档此物品', style: TextStyle(color: Colors.red)),
+                ),
               ),
-            ),
+            ],
           ],
         ),
       ),
@@ -312,15 +403,18 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _search(String text, {bool speakAfter = false}) async {
-    if (text.isEmpty) return;
+    final query = text.trim().isNotEmpty ? text.trim() : (_selectedTag ?? '');
+    if (query.isEmpty && (_selectedTag == null || _selectedTag!.isEmpty)) return;
     setState(() { _loading = true; _error = null; _hasSearched = true; });
     try {
       final locId = context.read<AppState>().activeLocationId;
       final data = await _api.post('/search/hybrid', body: {
-        'text': text,
+        'text': text.trim().isNotEmpty ? text.trim() : null,
         'limit': 20,
+        'include_history': _includeHistory,
         if (locId.isNotEmpty) 'location_id': locId,
         if (_selectedCategory != null && _selectedCategory!.isNotEmpty) 'category': _selectedCategory,
+        if (_selectedTag != null && _selectedTag!.isNotEmpty) 'tag': _selectedTag,
       });
       setState(() { _results = (data['results'] as List?) ?? []; });
       if (speakAfter) {
@@ -349,6 +443,7 @@ class _SearchScreenState extends State<SearchScreen> {
         if (mounted) {
           _loadRecentItems();
           _loadCategories();
+          _loadMarks();
         }
       });
     }
@@ -370,9 +465,31 @@ class _SearchScreenState extends State<SearchScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(value: false, label: Text('现有物品'), icon: Icon(Icons.inventory_2, size: 18)),
+                ButtonSegment(value: true, label: Text('历史记录'), icon: Icon(Icons.history, size: 18)),
+              ],
+              selected: {_includeHistory},
+              onSelectionChanged: (s) {
+                setState(() {
+                  _includeHistory = s.first;
+                  if (_includeHistory) _selectedCategory = null;
+                });
+                _loadMarks();
+                if (_hasSearched || _selectedTag != null) {
+                  _search(_ctrl.text.trim().isEmpty ? (_selectedTag ?? '') : _ctrl.text.trim());
+                }
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: SearchBar(
               controller: _ctrl,
-              hintText: _isListening ? (_voicePartial.isNotEmpty ? _voicePartial : '正在听您说…') : '输入或语音说出要找的物品…',
+              hintText: _isListening
+                  ? (_voicePartial.isNotEmpty ? _voicePartial : '正在听您说…')
+                  : (_includeHistory ? '搜索已归档物品…' : '输入或语音说出要找的物品…'),
               onSubmitted: (t) => _search(t),
               leading: Icon(
                 _isListening ? Icons.mic : Icons.search,
@@ -406,7 +523,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 style: TextStyle(color: Colors.red.shade700, fontSize: 13),
               ),
             ),
-          if (_categories.isNotEmpty)
+          if (!_includeHistory && _categories.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: SingleChildScrollView(
@@ -418,7 +535,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       selected: _selectedCategory == null,
                       onSelected: (_) {
                         setState(() => _selectedCategory = null);
-                        if (_hasSearched && _ctrl.text.isNotEmpty) _search(_ctrl.text);
+                        if (_hasSearched || _selectedTag != null) _search(_ctrl.text.trim().isEmpty ? (_selectedTag ?? '') : _ctrl.text);
                       },
                     ),
                     const SizedBox(width: 8),
@@ -429,7 +546,7 @@ class _SearchScreenState extends State<SearchScreen> {
                             selected: _selectedCategory == c,
                             onSelected: (sel) {
                               setState(() => _selectedCategory = sel ? c : null);
-                              if (_hasSearched && _ctrl.text.isNotEmpty) _search(_ctrl.text);
+                              if (_hasSearched || _selectedTag != null) _search(_ctrl.text.trim().isEmpty ? (_selectedTag ?? '') : _ctrl.text);
                             },
                           ),
                         )),
@@ -437,7 +554,63 @@ class _SearchScreenState extends State<SearchScreen> {
                 ),
               ),
             ),
-          if (_recentItems.isNotEmpty) ...[
+          if (_marks.isNotEmpty || !_includeHistory)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(_includeHistory ? '历史标记' : '标记筛选', style: Theme.of(context).textTheme.titleSmall),
+                      const Spacer(),
+                      if (!_includeHistory && _selectedTag != null)
+                        TextButton.icon(
+                          onPressed: _archiveByTag,
+                          icon: const Icon(Icons.archive_outlined, size: 18),
+                          label: Text('完成「$_selectedTag」'),
+                        ),
+                    ],
+                  ),
+                  if (_marks.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          FilterChip(
+                            label: const Text('全部标记'),
+                            selected: _selectedTag == null,
+                            onSelected: (_) {
+                              setState(() => _selectedTag = null);
+                              if (_hasSearched) _search(_ctrl.text);
+                            },
+                          ),
+                          const SizedBox(width: 8),
+                          ..._marks.map((m) {
+                          final tag = m['tag']?.toString() ?? '';
+                          final count = m['count'] ?? 0;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: FilterChip(
+                              label: Text('$tag ($count)'),
+                              selected: _selectedTag == tag,
+                              onSelected: (sel) {
+                                setState(() => _selectedTag = sel ? tag : null);
+                                setState(() => _hasSearched = true);
+                                _search(_ctrl.text.trim().isEmpty ? tag : _ctrl.text);
+                              },
+                            ),
+                          );
+                          }),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          if (!_includeHistory && _recentItems.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Text('已添加的物品（点击搜索，长按删除）', style: Theme.of(context).textTheme.titleSmall),
@@ -511,13 +684,13 @@ class _SearchScreenState extends State<SearchScreen> {
                         ),
                       )
                     : _hasSearched && _results.isEmpty
-                        ? const Center(
+                        ? Center(
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.search_off, size: 48, color: Colors.grey),
-                                SizedBox(height: 8),
-                                Text('未找到匹配物品'),
+                                const Icon(Icons.search_off, size: 48, color: Colors.grey),
+                                const SizedBox(height: 8),
+                                Text(_includeHistory ? '历史记录中未找到匹配物品' : '未找到匹配物品'),
                               ],
                             ),
                           )
@@ -559,7 +732,20 @@ class _SearchScreenState extends State<SearchScreen> {
                                           ),
                                         ],
                                       ),
-                                      if (r['score'] != null && r['score'] > 0)
+                                      if ((r['tags'] as List?)?.isNotEmpty == true)
+                                        Padding(
+                                          padding: const EdgeInsets.only(top: 4),
+                                          child: Text(
+                                            (r['tags'] as List).join(' · '),
+                                            style: TextStyle(fontSize: 11, color: Colors.orange.shade800),
+                                          ),
+                                        ),
+                                      if (r['is_deleted'] == true)
+                                        const Text(
+                                          '已归档',
+                                          style: TextStyle(fontSize: 11, color: Colors.grey),
+                                        )
+                                      else if (r['score'] != null && r['score'] > 0)
                                         Text(
                                           '相关度: ${(r['score'] * 100).toStringAsFixed(0)}% · 点击查看详情',
                                           style: const TextStyle(fontSize: 11, color: Colors.green),

@@ -21,10 +21,14 @@ def get_search_service(db: AsyncSession = Depends(get_db)) -> SearchService:
 def _result_items(results: list[dict]) -> list[schemas.SearchResultItem]:
     return [
         schemas.SearchResultItem(
+            id=r.get("id"),
             thumbnail_url=r.get("thumbnail_url"),
             item_label=r.get("label", r.get("item_label", "")),
             breadcrumb=r.get("breadcrumb", ""),
             slot_id=r.get("slot_id", ""),
+            tags=r.get("tags") or [],
+            is_deleted=r.get("is_deleted", False),
+            deleted_at=r.get("deleted_at"),
             last_updated=r.get("last_updated"),
             score=r.get("score", r.get("rrf_score", 0.0)),
         )
@@ -43,15 +47,28 @@ async def recent_items(
     return schemas.HybridSearchResponse(
         results=[
             schemas.SearchResultItem(
+                id=r.get("id"),
                 item_label=r["item_label"],
                 breadcrumb=r.get("breadcrumb", ""),
                 slot_id=r.get("slot_id", ""),
+                tags=r.get("tags") or [],
                 score=1.0,
             )
             for r in rows
         ],
         total=len(rows),
     )
+
+
+@router.get("/marks")
+async def list_marks(
+    location_id: str | None = None,
+    include_history: bool = False,
+    svc: SearchService = Depends(get_search_service),
+):
+    """各标记下的物品数量，用于筛选与批量归档。"""
+    marks = await svc.list_marks(location_id=location_id, include_history=include_history)
+    return {"marks": [schemas.MarkTagStat(**m) for m in marks]}
 
 
 @router.get("/categories")
@@ -77,7 +94,7 @@ async def hybrid_search(
     svc: SearchService = Depends(get_search_service),
 ):
     search_terms = data.text
-    if data.text and len(data.text) >= 2:
+    if data.text and len(data.text) >= 2 and not data.include_history:
         expanded = await semantic_search.expand_query(data.text)
         search_terms = " ".join(expanded)
 
@@ -85,6 +102,8 @@ async def hybrid_search(
         text=search_terms,
         location_id=data.location_id,
         category=data.category,
+        tag=data.tag,
+        include_history=data.include_history,
         limit=data.limit,
     )
     return schemas.HybridSearchResponse(results=_result_items(results), total=len(results))
@@ -100,23 +119,19 @@ async def search_by_image(
     """
     Upload an image → AI recognition extracts labels → text search finds similar items.
     """
-    # Save temp file
     suffix = os.path.splitext(file.filename or "search.jpg")[1] or ".jpg"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
 
     try:
-        # Analyze image with AI
         vision_result = await ai_recognition.analyze_image(tmp_path)
 
-        # Extract labels and use first few as search terms
         items_detected = vision_result.get("items", [])
         if items_detected:
             labels = [item.get("label", "") for item in items_detected if item.get("label")]
-            search_text = " ".join(labels[:5])  # Use up to 5 detected labels
+            search_text = " ".join(labels[:5])
         else:
-            # Fallback: use the summary as search text
             search_text = vision_result.get("summary", "")
 
         if not search_text:

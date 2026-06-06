@@ -609,8 +609,102 @@ class _SlotItemsTileState extends State<_SlotItemsTile> {
     }
   }
 
+  Future<void> _editItemTags(dynamic it) async {
+    final current = List<String>.from((it['tags'] as List?)?.map((e) => e.toString()) ?? []);
+    final selected = <String>{...current};
+    const presets = ['老家', '送人'];
+    final customCtrl = TextEditingController();
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: Text('标记「${it['label'] ?? ''}」'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('选择或添加标记，便于后续按标记搜索与批量归档'),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    for (final p in presets)
+                      FilterChip(
+                        label: Text(p),
+                        selected: selected.contains(p),
+                        onSelected: (v) => setDlg(() {
+                          if (v) {
+                            selected.add(p);
+                          } else {
+                            selected.remove(p);
+                          }
+                        }),
+                      ),
+                    for (final t in selected.where((t) => !presets.contains(t)))
+                      FilterChip(
+                        label: Text(t),
+                        selected: true,
+                        onSelected: (_) => setDlg(() => selected.remove(t)),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: customCtrl,
+                        decoration: const InputDecoration(
+                          labelText: '自定义标记',
+                          hintText: '如：捐赠、二手',
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add),
+                      onPressed: () {
+                        final v = customCtrl.text.trim();
+                        if (v.isNotEmpty) {
+                          setDlg(() {
+                            selected.add(v);
+                            customCtrl.clear();
+                          });
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('保存')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await widget.api.patch('/items/${it['id']}/tags', body: {'tags': selected.toList()});
+      if (mounted) {
+        context.read<AppState>().refreshSearchItems();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('标记已更新')));
+      }
+      setState(() => _items = null);
+      await _loadItems();
+      widget.onChanged();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
   void _showItemActions(dynamic it) {
     final borrowed = it['is_borrowed'] == true;
+    final tags = (it['tags'] as List?)?.map((e) => e.toString()).toList() ?? [];
     showModalBottomSheet(
       context: context,
       builder: (ctx) => SafeArea(
@@ -619,7 +713,21 @@ class _SlotItemsTileState extends State<_SlotItemsTile> {
           children: [
             ListTile(
               title: Text(it['label'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: borrowed && it['borrower'] != null ? Text('借给：${it['borrower']}') : null,
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (borrowed && it['borrower'] != null) Text('借给：${it['borrower']}'),
+                  if (tags.isNotEmpty) Text('标记：${tags.join('、')}', style: TextStyle(color: Colors.orange.shade800)),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.label_outline, color: Colors.orange),
+              title: const Text('添加/编辑标记'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _editItemTags(it);
+              },
             ),
             if (borrowed)
               ListTile(
@@ -658,7 +766,7 @@ class _SlotItemsTileState extends State<_SlotItemsTile> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('删除物品'),
-        content: Text('确定删除「$label」？'),
+        content: Text('确定归档「$label」？将从日常列表隐藏，可在检索页「历史记录」中查找。'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
           FilledButton(
@@ -674,7 +782,7 @@ class _SlotItemsTileState extends State<_SlotItemsTile> {
       await widget.api.delete('/items/$itemId');
       if (mounted) {
         context.read<AppState>().refreshSearchItems();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已删除 $label')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已归档 $label')));
       }
       setState(() => _items = null);
       await _loadItems();
@@ -818,6 +926,8 @@ class _SlotItemsTileState extends State<_SlotItemsTile> {
                   title: Text(it['label'] ?? '', style: const TextStyle(fontSize: 13)),
                   subtitle: Text(
                     [
+                      if ((it['tags'] as List?)?.isNotEmpty == true)
+                        (it['tags'] as List).join('、'),
                       if (it['category'] != null) it['category'],
                       if (it['brand'] != null) '品牌: ${it['brand']}',
                       if (it['is_chargeable'] == true) '需充电',
