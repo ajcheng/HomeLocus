@@ -1,0 +1,26 @@
+FROM python:3.12-slim
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ffmpeg libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# CPU 版 torch，避免下载 500MB+ CUDA 依赖
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+COPY requirements-qwen.txt .
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r requirements-qwen.txt
+
+COPY app.py .
+
+ENV PORT=8781
+ENV ASR_BACKEND=qwen_pytorch
+ENV ASR_MODEL_DIR=Qwen/Qwen3-ASR-0.6B
+ENV ASR_LANGUAGE=Chinese
+ENV HF_HOME=/models/hf
+ENV TRANSFORMERS_CACHE=/models/hf
+
+RUN mkdir -p /models/hf
+
+EXPOSE 8781
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8781"]

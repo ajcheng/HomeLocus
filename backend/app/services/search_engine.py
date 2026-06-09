@@ -24,13 +24,24 @@ class SearchEngine:
     """Hybrid search engine: Meilisearch (text) + Qdrant (vector)."""
 
     def __init__(self):
-        # Meilisearch
-        self.meili = meilisearch.Client(settings.meilisearch_url, settings.meilisearch_api_key)
-        self._ensure_meili_index()
+        self.meili_enabled = False
+        self.qdrant_enabled = False
 
-        # Qdrant
-        self.qdrant = QdrantClient(url=settings.qdrant_url)
-        self._ensure_qdrant_collection()
+        try:
+            self.meili = meilisearch.Client(settings.meilisearch_url, settings.meilisearch_api_key)
+            self._ensure_meili_index()
+            self.meili_enabled = True
+        except Exception as e:
+            logger.warning("Meilisearch unavailable, text index disabled: %s", e)
+            self.meili = None
+
+        try:
+            self.qdrant = QdrantClient(url=settings.qdrant_url)
+            self._ensure_qdrant_collection()
+            self.qdrant_enabled = True
+        except Exception as e:
+            logger.warning("Qdrant unavailable, vector search disabled: %s", e)
+            self.qdrant = None
 
     # ---- Meilisearch (Text Search) ----
     def _ensure_meili_index(self):
@@ -63,6 +74,8 @@ class SearchEngine:
             "ocr_text": ocr_text,
             "location_id": location_id,
         }
+        if not self.meili_enabled:
+            return
         try:
             self.meili.index("items").add_documents([doc])
         except Exception as e:
@@ -76,6 +89,8 @@ class SearchEngine:
         limit: int = 20,
     ) -> list[dict]:
         """Full-text search with optional location/category filter."""
+        if not self.meili_enabled:
+            return []
         try:
             opt_params = {"limit": limit}
             filters = []
@@ -95,6 +110,8 @@ class SearchEngine:
             return []
 
     def delete_text_index(self, item_id: str):
+        if not self.meili_enabled:
+            return
         try:
             self.meili.index("items").delete_document(item_id)
         except Exception:
@@ -112,6 +129,8 @@ class SearchEngine:
 
     def index_vector(self, item_id: str, vector: list[float], payload: dict | None = None):
         """Upsert a vector embedding for an item."""
+        if not self.qdrant_enabled:
+            return
         try:
             uid = _str_to_uuid(item_id)
             self.qdrant.upsert(
@@ -123,6 +142,8 @@ class SearchEngine:
 
     def search_vector(self, vector: list[float], location_id: str | None = None, limit: int = 20) -> list[dict]:
         """Vector similarity search."""
+        if not self.qdrant_enabled:
+            return []
         try:
             results = self.qdrant.search(
                 collection_name="items",
@@ -138,6 +159,8 @@ class SearchEngine:
             return []
 
     def delete_vector_index(self, item_id: str):
+        if not self.qdrant_enabled:
+            return
         try:
             uid = _str_to_uuid(item_id)
             self.qdrant.delete("items", points_selector=[uid])

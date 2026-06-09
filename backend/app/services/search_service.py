@@ -1,7 +1,7 @@
 from collections import Counter
 from typing import Optional
 
-from sqlalchemy import select, or_, distinct
+from sqlalchemy import String, select, or_, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.space import Slot, Container, Zone, Location
@@ -233,15 +233,23 @@ class SearchService:
     ) -> list[dict]:
         stmt = self._base_item_stmt(location_id, category, tag, include_history)
         if text:
-            pattern = f"%{text}%"
-            stmt = stmt.where(
-                or_(
-                    Item.label.ilike(pattern),
-                    Item.brand.ilike(pattern),
-                    Item.category.ilike(pattern),
-                    Item.ai_label_raw.ilike(pattern),
+            terms = [t.strip() for t in text.replace("，", ",").replace("、", ",").split(",") if t.strip()]
+            if not terms:
+                terms = [text.strip()]
+            for term in terms:
+                pattern = f"%{term}%"
+                stmt = stmt.where(
+                    or_(
+                        Item.label.ilike(pattern),
+                        Item.brand.ilike(pattern),
+                        Item.category.ilike(pattern),
+                        Item.color.ilike(pattern),
+                        Item.purpose.ilike(pattern),
+                        Item.raw_recognition.ilike(pattern),
+                        Item.ai_label_raw.ilike(pattern),
+                        Item.tags.cast(String).ilike(pattern),
+                    )
                 )
-            )
         order_col = Item.deleted_at.desc() if include_history else Item.updated_at.desc()
         stmt = stmt.order_by(order_col).limit(limit)
         result = await self.db.execute(stmt)

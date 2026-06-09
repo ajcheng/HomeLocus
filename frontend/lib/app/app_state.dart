@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../models/app_settings.dart';
+import '../services/settings_service.dart';
+
 class AppState extends ChangeNotifier {
+  final SettingsService _settingsService = SettingsService();
+
   String _token = '';
   String _activeLocationId = '';
   String _activeLocationName = '我的家';
@@ -9,6 +14,8 @@ class AppState extends ChangeNotifier {
   int _homeTabIndex = 0;
   String? _focusSlotId;
   String? _focusZoneId;
+  AppSettings _settings = AppSettings();
+  bool _settingsLoaded = false;
 
   String get token => _token;
   String get activeLocationId => _activeLocationId;
@@ -19,6 +26,21 @@ class AppState extends ChangeNotifier {
   int get homeTabIndex => _homeTabIndex;
   String? get focusSlotId => _focusSlotId;
   String? get focusZoneId => _focusZoneId;
+  AppSettings get settings => _settings;
+  bool get settingsLoaded => _settingsLoaded;
+  bool get useCustomRecognition => _settings.useCustomRecognition;
+
+  Future<void> loadSettings() async {
+    _settings = await _settingsService.load();
+    _settingsLoaded = true;
+    notifyListeners();
+  }
+
+  Future<void> saveSettings(AppSettings settings) async {
+    _settings = settings;
+    await _settingsService.save(settings);
+    notifyListeners();
+  }
 
   void refreshSearchItems() {
     _searchListVersion++;

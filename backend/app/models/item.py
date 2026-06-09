@@ -17,7 +17,10 @@ class Item(Base):
     label: Mapped[str] = mapped_column(String(200), nullable=False)
     brand: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    color: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    purpose: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     tags: Mapped[Optional[list]] = mapped_column(JSONB, default=list)
+    raw_recognition: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Bounding box in source image
     bounding_box: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)

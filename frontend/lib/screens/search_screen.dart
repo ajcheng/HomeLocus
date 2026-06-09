@@ -7,7 +7,9 @@ import 'package:speech_to_text/speech_to_text.dart';
 
 import '../app/app_state.dart';
 import '../services/api_client.dart';
+import '../services/item_media_store.dart';
 import '../services/tts_service.dart';
+import '../widgets/item_media_actions.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -18,6 +20,7 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _api = ApiClient();
+  final _mediaStore = ItemMediaStore();
   final _ctrl = TextEditingController();
   final _speech = SpeechToText();
   final _tts = TtsService();
@@ -38,7 +41,8 @@ class _SearchScreenState extends State<SearchScreen> {
   int _loadedListVersion = -1;
   String _voicePartial = '';
 
-  final _suggestions = ['鼠标', '充电', '保暖', '发票', '工具', '药品', '冬季', '相机'];
+  static const _recentLimit = 5;
+  static const _filterListLimit = 100;
 
   @override
   void initState() {
@@ -126,8 +130,8 @@ class _SearchScreenState extends State<SearchScreen> {
     try {
       final locId = context.read<AppState>().activeLocationId;
       final path = locId.isNotEmpty
-          ? '/search/recent?limit=30&location_id=$locId'
-          : '/search/recent?limit=30';
+          ? '/search/recent?limit=$_recentLimit&location_id=$locId'
+          : '/search/recent?limit=$_recentLimit';
       final data = await _api.get(path);
       if (mounted) {
         setState(() {
@@ -289,14 +293,18 @@ class _SearchScreenState extends State<SearchScreen> {
       context.read<AppState>().refreshSearchItems();
       await _loadRecentItems();
       await _loadMarks();
-      if (_hasSearched) await _search(_ctrl.text.trim().isEmpty ? tag : _ctrl.text.trim());
+      if (_hasActiveFilter) await _applyFilters();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已归档 $n 件物品')));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
-  void _showResultDetail(dynamic r) {
+  Future<void> _showResultDetail(dynamic r) async {
+    final itemId = r['id']?.toString() ?? '';
+    final media = itemId.isNotEmpty ? await _mediaStore.get(itemId) : null;
+    if (!mounted) return;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -352,6 +360,11 @@ class _SearchScreenState extends State<SearchScreen> {
                 style: TextStyle(color: Colors.green.shade700),
               ),
             ],
+            ItemMediaActions(
+              imagePath: media?.imagePath,
+              audioPath: media?.audioPath,
+              remoteImageUrl: r['thumbnail_url']?.toString(),
+            ),
             const SizedBox(height: 20),
             Row(
               children: [
@@ -402,28 +415,75 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  Future<void> _search(String text, {bool speakAfter = false}) async {
-    final query = text.trim().isNotEmpty ? text.trim() : (_selectedTag ?? '');
-    if (query.isEmpty && (_selectedTag == null || _selectedTag!.isEmpty)) return;
-    setState(() { _loading = true; _error = null; _hasSearched = true; });
+  bool get _hasActiveFilter {
+    final hasText = _ctrl.text.trim().isNotEmpty;
+    final hasCategory = _selectedCategory != null && _selectedCategory!.isNotEmpty;
+    final hasTag = _selectedTag != null && _selectedTag!.isNotEmpty;
+    return hasText || hasCategory || hasTag;
+  }
+
+  String? get _resultsTitle {
+    if (_selectedCategory != null && _selectedCategory!.isNotEmpty) {
+      return '分类：$_selectedCategory';
+    }
+    if (_selectedTag != null && _selectedTag!.isNotEmpty) {
+      return '标记：$_selectedTag';
+    }
+    if (_ctrl.text.trim().isNotEmpty) {
+      return '搜索：${_ctrl.text.trim()}';
+    }
+    return null;
+  }
+
+  Future<void> _applyFilters({String? text, bool speakAfter = false}) async {
+    final queryText = (text ?? _ctrl.text).trim();
+    final hasCategory = _selectedCategory != null && _selectedCategory!.isNotEmpty;
+    final hasTag = _selectedTag != null && _selectedTag!.isNotEmpty;
+
+    if (queryText.isEmpty && !hasCategory && !hasTag) {
+      setState(() {
+        _hasSearched = false;
+        _results = [];
+        _error = null;
+        _loading = false;
+      });
+      return;
+    }
+
+    setState(() {
+      _loading = true;
+      _error = null;
+      _hasSearched = true;
+    });
     try {
       final locId = context.read<AppState>().activeLocationId;
+      final browseOnly = queryText.isEmpty && (hasCategory || hasTag);
       final data = await _api.post('/search/hybrid', body: {
-        'text': text.trim().isNotEmpty ? text.trim() : null,
-        'limit': 20,
+        'text': queryText.isNotEmpty ? queryText : null,
+        'limit': browseOnly ? _filterListLimit : 20,
         'include_history': _includeHistory,
         if (locId.isNotEmpty) 'location_id': locId,
-        if (_selectedCategory != null && _selectedCategory!.isNotEmpty) 'category': _selectedCategory,
-        if (_selectedTag != null && _selectedTag!.isNotEmpty) 'tag': _selectedTag,
+        if (hasCategory) 'category': _selectedCategory,
+        if (hasTag) 'tag': _selectedTag,
       });
-      setState(() { _results = (data['results'] as List?) ?? []; });
+      setState(() => _results = (data['results'] as List?) ?? []);
       if (speakAfter) {
-        await _speakResults(_results, query: text);
+        await _speakResults(_results, query: queryText.isNotEmpty ? queryText : _resultsTitle);
       }
     } catch (e) {
-      setState(() { _error = '$e'; _results = []; });
+      setState(() {
+        _error = '$e';
+        _results = [];
+      });
     }
     setState(() => _loading = false);
+  }
+
+  Future<void> _search(String text, {bool speakAfter = false}) async {
+    if (text.trim().isNotEmpty) {
+      _ctrl.text = text.trim();
+    }
+    await _applyFilters(text: text, speakAfter: speakAfter);
   }
 
   Future<void> _speakCurrentResults() async {
@@ -477,8 +537,10 @@ class _SearchScreenState extends State<SearchScreen> {
                   if (_includeHistory) _selectedCategory = null;
                 });
                 _loadMarks();
-                if (_hasSearched || _selectedTag != null) {
-                  _search(_ctrl.text.trim().isEmpty ? (_selectedTag ?? '') : _ctrl.text.trim());
+                if (_hasActiveFilter) {
+                  _applyFilters();
+                } else {
+                  setState(() => _hasSearched = false);
                 }
               },
             ),
@@ -535,7 +597,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       selected: _selectedCategory == null,
                       onSelected: (_) {
                         setState(() => _selectedCategory = null);
-                        if (_hasSearched || _selectedTag != null) _search(_ctrl.text.trim().isEmpty ? (_selectedTag ?? '') : _ctrl.text);
+                        _applyFilters();
                       },
                     ),
                     const SizedBox(width: 8),
@@ -546,7 +608,7 @@ class _SearchScreenState extends State<SearchScreen> {
                             selected: _selectedCategory == c,
                             onSelected: (sel) {
                               setState(() => _selectedCategory = sel ? c : null);
-                              if (_hasSearched || _selectedTag != null) _search(_ctrl.text.trim().isEmpty ? (_selectedTag ?? '') : _ctrl.text);
+                              _applyFilters();
                             },
                           ),
                         )),
@@ -583,7 +645,7 @@ class _SearchScreenState extends State<SearchScreen> {
                             selected: _selectedTag == null,
                             onSelected: (_) {
                               setState(() => _selectedTag = null);
-                              if (_hasSearched) _search(_ctrl.text);
+                              _applyFilters();
                             },
                           ),
                           const SizedBox(width: 8),
@@ -597,8 +659,7 @@ class _SearchScreenState extends State<SearchScreen> {
                               selected: _selectedTag == tag,
                               onSelected: (sel) {
                                 setState(() => _selectedTag = sel ? tag : null);
-                                setState(() => _hasSearched = true);
-                                _search(_ctrl.text.trim().isEmpty ? tag : _ctrl.text);
+                                _applyFilters();
                               },
                             ),
                           );
@@ -610,10 +671,10 @@ class _SearchScreenState extends State<SearchScreen> {
                 ],
               ),
             ),
-          if (!_includeHistory && _recentItems.isNotEmpty) ...[
+          if (!_includeHistory && !_hasSearched && _recentItems.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text('已添加的物品（点击搜索，长按删除）', style: Theme.of(context).textTheme.titleSmall),
+              child: Text('最近添加（点击搜索，长按删除）', style: Theme.of(context).textTheme.titleSmall),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -622,7 +683,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   : Wrap(
                       spacing: 8,
                       runSpacing: 6,
-                      children: _recentItems.map((r) {
+                      children: _recentItems.take(_recentLimit).map((r) {
                         final label = r['item_label'] ?? '';
                         return GestureDetector(
                           onLongPress: () => _deleteRecentItem(r),
@@ -640,19 +701,12 @@ class _SearchScreenState extends State<SearchScreen> {
             ),
             const SizedBox(height: 8),
           ],
-          if (!_hasSearched)
+          if (_hasSearched && _resultsTitle != null)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: _suggestions.map((s) => ActionChip(
-                      label: Text(s),
-                      onPressed: () {
-                        _ctrl.text = s;
-                        _search(s);
-                      },
-                    )).toList(),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              child: Text(
+                '${_resultsTitle!}（${_results.length} 件）',
+                style: Theme.of(context).textTheme.titleSmall,
               ),
             ),
           Expanded(

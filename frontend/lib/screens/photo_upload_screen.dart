@@ -5,6 +5,10 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../app/app_state.dart';
 import '../services/api_client.dart';
+import '../services/local_file_service.dart';
+import '../widgets/item_image.dart';
+import 'image_gallery_screen.dart';
+import 'client_recognition_screen.dart';
 import 'recognition_screen.dart';
 
 class PhotoUploadScreen extends StatefulWidget {
@@ -13,16 +17,35 @@ class PhotoUploadScreen extends StatefulWidget {
   State<PhotoUploadScreen> createState() => _PhotoUploadScreenState();
 }
 
-class _PhotoUploadScreenState extends State<PhotoUploadScreen> {
+class _PhotoUploadScreenState extends State<PhotoUploadScreen> with SingleTickerProviderStateMixin {
   final _api = ApiClient();
   final _picker = ImagePicker();
+  final _localFiles = LocalFileService();
   List<dynamic> _locations = [];
   String? _selectedLocationId, _selectedSlotId, _selectedSlotName;
   File? _image;
+  String? _localImagePath;
   bool _uploading = false, _loading = true;
+  int _galleryRefresh = 0;
+  late final TabController _tabs;
 
   @override
-  void initState() { super.initState(); _loadLocations(); }
+  void initState() {
+    super.initState();
+    _tabs = TabController(length: 2, vsync: this);
+    _tabs.addListener(() {
+      if (_tabs.index == 1 && !_tabs.indexIsChanging) {
+        setState(() => _galleryRefresh++);
+      }
+    });
+    _loadLocations();
+  }
+
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
+  }
 
   Future<void> _loadLocations() async {
     try {
@@ -84,18 +107,59 @@ class _PhotoUploadScreenState extends State<PhotoUploadScreen> {
 
   Future<void> _pickImage(ImageSource source) async {
     final img = await _picker.pickImage(source: source, maxWidth: 1920);
-    if (img != null) setState(() => _image = File(img.path));
+    if (img == null) return;
+    final localPath = await _localFiles.saveImageFromPicker(img.path);
+    setState(() {
+      _image = File(localPath);
+      _localImagePath = localPath;
+    });
   }
 
   Future<void> _upload() async {
     if (_image == null || _selectedSlotId == null) return;
+
+    final useCustom = context.read<AppState>().useCustomRecognition;
+    if (useCustom) {
+      setState(() => _uploading = true);
+      final saved = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ClientRecognitionScreen(
+            slotId: _selectedSlotId!,
+            localImagePath: _localImagePath ?? _image!.path,
+          ),
+        ),
+      );
+      if (saved == true && mounted) {
+        setState(() {
+          _galleryRefresh++;
+          _image = null;
+          _localImagePath = null;
+        });
+      }
+      setState(() => _uploading = false);
+      return;
+    }
+
     setState(() => _uploading = true);
     try {
       final r = await _api.uploadFile('/items/upload', _image!, {'slot_id': _selectedSlotId!});
       final b = await r.stream.bytesToString();
       if (r.statusCode == 200) {
         final d = jsonDecode(b);
-        if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => RecognitionResultScreen(taskId: d['task_id'], slotId: _selectedSlotId!)));
+        if (mounted) {
+          setState(() => _galleryRefresh++);
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => RecognitionResultScreen(
+                taskId: d['task_id'],
+                slotId: _selectedSlotId!,
+                localImagePath: _localImagePath ?? _image?.path,
+              ),
+            ),
+          );
+        }
       } else { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$b'))); }
     } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e'))); }
     setState(() => _uploading = false);
@@ -104,8 +168,20 @@ class _PhotoUploadScreenState extends State<PhotoUploadScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('拍照添加物品')),
-      body: _loading ? const Center(child: CircularProgressIndicator()) : SingleChildScrollView(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      appBar: AppBar(
+        title: const Text('拍照与图库'),
+        bottom: TabBar(
+          controller: _tabs,
+          tabs: const [
+            Tab(icon: Icon(Icons.camera_alt), text: '拍照识别'),
+            Tab(icon: Icon(Icons.photo_library), text: '原始图片'),
+          ],
+        ),
+      ),
+      body: TabBarView(
+        controller: _tabs,
+        children: [
+          _loading ? const Center(child: CircularProgressIndicator()) : SingleChildScrollView(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Text('1. 选择地点', style: Theme.of(context).textTheme.titleMedium), const SizedBox(height: 8),
         Wrap(spacing: 8, children: _locations.map((l) => ChoiceChip(
           label: Text(l['name'] ?? ''),
@@ -117,13 +193,26 @@ class _PhotoUploadScreenState extends State<PhotoUploadScreen> {
         )).toList()),
         if (_selectedSlotId != null) ...[const SizedBox(height: 16), Card(color: Colors.green.shade50, child: Padding(padding: const EdgeInsets.all(12), child: Row(children: [const Icon(Icons.check_circle, color: Colors.green), const SizedBox(width: 8), Expanded(child: Text('位置: $_selectedSlotName')), IconButton(icon: const Icon(Icons.edit, size: 18), onPressed: () => _pickSlot(_selectedLocationId!))])))],
         const SizedBox(height: 20), Text('2. 拍照', style: Theme.of(context).textTheme.titleMedium), const SizedBox(height: 8),
-        if (_image != null) ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.file(_image!, height: 250, width: double.infinity, fit: BoxFit.cover))
+        if (_image != null)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              height: 250,
+              width: double.infinity,
+              child: ItemImage(localPath: _localImagePath ?? _image!.path, fit: BoxFit.cover),
+            ),
+          )
         else Container(height: 200, decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(12), color: Colors.grey.shade100), child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.camera_alt, size: 48, color: Colors.grey.shade400), const SizedBox(height: 8), const Text('点击下方按钮拍照或选择照片')]))),
         const SizedBox(height: 12),
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [FilledButton.tonalIcon(onPressed: () => _pickImage(ImageSource.camera), icon: const Icon(Icons.camera), label: const Text('拍照')), const SizedBox(width: 16), FilledButton.tonalIcon(onPressed: () => _pickImage(ImageSource.gallery), icon: const Icon(Icons.photo_library), label: const Text('相册'))]),
         const SizedBox(height: 24),
-        SizedBox(height: 52, child: FilledButton.icon(onPressed: (_image != null && _selectedSlotId != null && !_uploading) ? _upload : null, icon: _uploading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.cloud_upload), label: Text(_uploading ? '上传中...' : '上传并识别'))),
+        SizedBox(height: 52, child: FilledButton.icon(onPressed: (_image != null && _selectedSlotId != null && !_uploading) ? _upload : null, icon: _uploading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.cloud_upload), label: Text(_uploading ? '识别中...' : (context.watch<AppState>().useCustomRecognition ? '自定义识别（本机网关）' : '上传并识别（服务端千问 VL）')))),
+        const SizedBox(height: 8),
+        Text('原图同时保存到本机 images/年/月/日/', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
       ])),
+          ImageGalleryScreen(refreshToken: _galleryRefresh),
+        ],
+      ),
     );
   }
 }

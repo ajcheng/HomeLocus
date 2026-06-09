@@ -9,6 +9,7 @@ import httpx
 from PIL import Image
 
 from app.core.config import settings
+from app.services.media_gateway_client import upload_image_file
 
 logger = logging.getLogger(__name__)
 
@@ -55,14 +56,28 @@ class AIRecognitionService:
         return settings.ai_provider in ("openai", "custom")
 
     def _use_yolo(self) -> bool:
-        provider = (settings.recognition_provider or "yolo").lower()
-        if provider == "vision":
+        provider = (settings.recognition_provider or "qwen").lower()
+        if provider in ("vision", "qwen"):
             return False
         if not (settings.yolo_api_url or "").strip():
             return False
         return provider in ("yolo", "auto")
 
+    def _use_qwen(self) -> bool:
+        provider = (settings.recognition_provider or "qwen").lower()
+        return provider in ("qwen", "qwen_tenant", "auto")
+
     async def analyze_image(self, image_path: str) -> dict:
+        if self._use_qwen():
+            try:
+                result = await self._analyze_qwen_tenant(image_path)
+                if result.get("items"):
+                    return result
+            except Exception as e:
+                logger.warning("Qwen vision failed: %s", e)
+                if (settings.recognition_provider or "").lower() == "qwen":
+                    return self._simulate_detection(image_path, reason=f"Qwen 识别失败: {e}")
+
         if self._use_yolo():
             try:
                 result = await self._analyze_yolo(image_path)
@@ -197,6 +212,58 @@ class AIRecognitionService:
                 except json.JSONDecodeError:
                     pass
             return {"items": [], "summary": content[:200]}
+
+    async def _analyze_qwen_tenant(self, image_path: str) -> dict:
+        """media-gateway 上传 + 千问 VL 租户 API，与 app_local 一致。"""
+        api_key = settings.vision_api_key or settings.ai_api_key
+        if not api_key:
+            raise RuntimeError("VISION_API_KEY / AI_API_KEY 未配置")
+
+        image_url = await upload_image_file(image_path)
+        body = {
+            "msgList": [
+                {
+                    "msgRole": "USER",
+                    "msgContent": settings.vision_prompt,
+                    "imageFileUrls": [image_url],
+                }
+            ],
+            "model": settings.vision_model,
+            "tenantId": settings.vision_tenant_id,
+            "modelOption": {"temperature": 1},
+            "apiKey": api_key,
+        }
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(settings.vision_api_url, json=body)
+        if response.status_code >= 400:
+            raise RuntimeError(f"Qwen VL HTTP {response.status_code}: {response.text[:300]}")
+        data = response.json()
+        if not data.get("success"):
+            raise RuntimeError(data.get("message") or "Qwen VL 识别失败")
+        content = (data.get("data") or {}).get("content") or ""
+        items = self._parse_qwen_pipe_content(content)
+        return {"items": items, "summary": content[:200], "provider": "qwen_tenant", "image_url": image_url}
+
+    def _parse_qwen_pipe_content(self, content: str) -> list[dict]:
+        items: list[dict] = []
+        for line in content.splitlines():
+            cleaned = line.strip().lstrip("-*•").strip()
+            cleaned = cleaned.lstrip("0123456789.").strip()
+            if not cleaned:
+                continue
+            if "|" in cleaned:
+                parts = [p.strip() for p in cleaned.split("|")]
+                items.append({
+                    "label": parts[0] if parts else cleaned,
+                    "brand": parts[1] if len(parts) > 1 and parts[1] else None,
+                    "color": parts[2] if len(parts) > 2 and parts[2] else None,
+                    "category": parts[3] if len(parts) > 3 and parts[3] else None,
+                    "purpose": parts[4] if len(parts) > 4 and parts[4] else None,
+                    "ai_label_raw": line.strip(),
+                })
+            elif cleaned:
+                items.append({"label": cleaned, "ai_label_raw": cleaned})
+        return items
 
     async def _analyze_yolo(self, image_path: str) -> dict:
         """调用 homelocus-yolo-vision FastAPI（/v1/analyze）。"""

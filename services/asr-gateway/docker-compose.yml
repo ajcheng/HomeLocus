@@ -1,0 +1,25 @@
+# 本机运行 Qwen3-ASR 网关，生产经 WireGuard 192.168.100.19:8781 访问
+services:
+  asr-gateway:
+    image: homelocus-asr-gateway:qwen
+    build:
+      context: .
+      dockerfile: Dockerfile.qwen
+    ports:
+      - "0.0.0.0:8781:8781"
+    environment:
+      ASR_BACKEND: qwen_pytorch
+      ASR_MODEL_DIR: /models/Qwen3-ASR-0.6B
+      ASR_LANGUAGE: Chinese
+      ASR_GATEWAY_API_KEY: ${ASR_GATEWAY_API_KEY:-}
+      HF_HOME: /models/hf
+      TRANSFORMERS_CACHE: /models/hf
+      HF_HUB_OFFLINE: "1"
+    volumes:
+      - ${ASR_MODEL_HOST_DIR:-/home/aj/models/Qwen3-ASR-0.6B}:/models/Qwen3-ASR-0.6B:ro
+      - asr_models:/models/hf
+    mem_limit: 8g
+    restart: unless-stopped
+
+volumes:
+  asr_models:

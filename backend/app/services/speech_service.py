@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.models.space import Slot, Container, Zone, Location
 from app.models.item import Item
 from app.schemas.speech import ParsedItem, MatchedSlot
+from app.utils.voice_parser import parse_voice_text
 from app.schemas import reminder as reminder_schemas
 from app.services.search_service import SearchService
 from app.services.reminder_service import ReminderService
@@ -51,19 +52,47 @@ class SpeechService:
         self.db = db
 
     async def transcribe(self, audio_path: str) -> str:
-        """Speech-to-text via OpenAI-compatible Whisper API."""
+        """Speech-to-text via ASR gateway (Qwen3-ASR)，与 app_local 一致。"""
+        gateway = (settings.asr_gateway_url or "").rstrip("/")
+        if gateway:
+            mime = "audio/wav"
+            if audio_path.endswith(".m4a"):
+                mime = "audio/mp4"
+            elif audio_path.endswith(".mp3"):
+                mime = "audio/mpeg"
+            elif audio_path.endswith(".ogg"):
+                mime = "audio/ogg"
+            headers = {}
+            if settings.asr_gateway_api_key:
+                headers["Authorization"] = f"Bearer {settings.asr_gateway_api_key}"
+            try:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    with open(audio_path, "rb") as audio_file:
+                        response = await client.post(
+                            f"{gateway}/transcribe",
+                            files={"file": (os.path.basename(audio_path), audio_file, mime)},
+                            data={"language": settings.asr_language or "Chinese"},
+                            headers=headers,
+                        )
+                    if response.status_code != 200:
+                        logger.error("ASR gateway HTTP %s: %s", response.status_code, response.text[:300])
+                        return ""
+                    payload = response.json()
+                    text = (payload.get("text") or "").strip()
+                    if text:
+                        logger.info("ASR gateway transcription: %s...", text[:80])
+                    return text
+            except Exception as e:
+                logger.error("ASR gateway failed: %s", e)
+                return ""
+
         if not settings.ai_api_key:
-            logger.warning("ASR skipped: AI_API_KEY not configured")
+            logger.warning("ASR skipped: no ASR_GATEWAY_URL and no AI_API_KEY")
             return ""
 
         mime = "audio/wav"
         if audio_path.endswith(".m4a"):
             mime = "audio/mp4"
-        elif audio_path.endswith(".mp3"):
-            mime = "audio/mpeg"
-        elif audio_path.endswith(".ogg"):
-            mime = "audio/ogg"
-
         try:
             async with httpx.AsyncClient(timeout=90.0) as client:
                 with open(audio_path, "rb") as audio_file:
@@ -74,21 +103,29 @@ class SpeechService:
                         data={"model": settings.asr_model, "language": "zh"},
                     )
                 if response.status_code != 200:
-                    logger.error(f"ASR HTTP {response.status_code}: {response.text[:300]}")
                     return ""
-                payload = response.json()
-                text = payload.get("text", "").strip()
-                if text:
-                    logger.info(f"ASR transcription: {text[:80]}...")
-                return text
+                return (response.json().get("text") or "").strip()
         except Exception as e:
-            logger.error(f"ASR failed: {e}")
+            logger.error("Whisper ASR failed: %s", e)
             return ""
 
     async def parse_item_from_text(self, text: str) -> ParsedItem:
-        """Use AI to extract structured item info from natural language."""
+        """优先使用本地规则解析（与 app_local 一致），再尝试 LLM 补充位置提示。"""
+        parsed_local = parse_voice_text(text)
+        item = ParsedItem(
+            label=parsed_local.label or text,
+            color=parsed_local.color,
+            tags=parsed_local.tags or [],
+            raw_recognition=text,
+        )
+
         if not settings.ai_api_key:
-            return self._regex_parse(text)
+            regex_item = self._regex_parse(text)
+            item.slot_name_hint = regex_item.slot_name_hint
+            item.container_name_hint = regex_item.container_name_hint
+            item.zone_name_hint = regex_item.zone_name_hint
+            item.is_chargeable = regex_item.is_chargeable
+            return item
 
         try:
             content = await self._llm_parse(PARSE_PROMPT.format(text=text))
@@ -97,11 +134,14 @@ class SpeechService:
                 items = data.get("items", [])
                 if items:
                     first = items[0]
+                    merged_tags = list(dict.fromkeys((parsed_local.tags or []) + first.get("tags", [])))
                     return ParsedItem(
-                        label=first.get("label", text),
+                        label=parsed_local.label or first.get("label", text),
                         brand=first.get("brand"),
                         category=first.get("category"),
-                        tags=first.get("tags", []),
+                        color=parsed_local.color,
+                        tags=merged_tags,
+                        raw_recognition=text,
                         is_chargeable=first.get("is_chargeable", False),
                         slot_name_hint=first.get("slot_name_hint"),
                         container_name_hint=first.get("container_name_hint"),
@@ -110,7 +150,12 @@ class SpeechService:
         except Exception as e:
             logger.error(f"NLP parsing failed: {e}")
 
-        return self._regex_parse(text)
+        regex_item = self._regex_parse(text)
+        item.slot_name_hint = regex_item.slot_name_hint
+        item.container_name_hint = regex_item.container_name_hint
+        item.zone_name_hint = regex_item.zone_name_hint
+        item.is_chargeable = regex_item.is_chargeable
+        return item
 
     async def _llm_parse(self, prompt: str) -> str | None:
         prefer_openai = settings.ai_provider in ("openai", "custom")
@@ -234,14 +279,17 @@ class SpeechService:
             breadcrumb=f"{loc.name} / {z.name} / {c.name} / {slot.name}",
         )
 
-    async def add_item_from_speech(self, parsed: ParsedItem, slot_id: str) -> Item:
+    async def add_item_from_speech(self, parsed: ParsedItem, slot_id: str, transcription: str = "") -> Item:
         item = Item(
             is_confirmed=True,
             slot_id=slot_id,
             label=parsed.label,
             brand=parsed.brand,
             category=parsed.category,
+            color=parsed.color,
+            purpose=getattr(parsed, "purpose", None),
             tags=parsed.tags,
+            raw_recognition=parsed.raw_recognition or transcription or parsed.label,
             is_chargeable=parsed.is_chargeable,
         )
         self.db.add(item)

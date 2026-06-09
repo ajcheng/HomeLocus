@@ -37,8 +37,25 @@ class Settings(BaseSettings):
     ai_vision_model: str = "deepseek-chat"  # Model with vision support
     asr_model: str = "whisper-1"
 
-    # Image recognition: yolo (local OpenVINO) | vision (cloud API) | auto (yolo then vision)
-    recognition_provider: str = "yolo"
+    # ASR / Media 网关（与 app_local 一致）
+    asr_gateway_url: str = "https://home.ajcheng.com:8443/asr"
+    asr_gateway_api_key: str = ""
+    asr_language: str = "Chinese"
+    media_gateway_url: str = "https://home.ajcheng.com:8443/media"
+    media_gateway_api_key: str = ""
+
+    # 千问 VL 租户 API（recognition_provider=qwen 时使用）
+    vision_api_url: str = "https://nfam-api.yst.com.cn/tenant/trans/call"
+    vision_api_key: str = ""
+    vision_model: str = "qwen-vl-plus"
+    vision_tenant_id: str = ""
+    vision_prompt: str = (
+        "简洁语言输出图片物品中文名称，品牌型号（如有），颜色，用途、分类信息。"
+        "每个物品一行，格式：名称|品牌|颜色|分类|用途"
+    )
+
+    # Image recognition: qwen | yolo | vision | auto
+    recognition_provider: str = "qwen"
     yolo_api_url: str = "http://192.168.100.19:8765"
     yolo_api_key: str = ""
     yolo_model: str = "yolo11"  # yolo11 | worldv2 | both

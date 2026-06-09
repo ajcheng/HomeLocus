@@ -26,9 +26,15 @@ void main() async {
 
   await PushService.initialize();
 
+  final appState = AppState();
+  await appState.loadSettings();
+  if (savedUrl == null || savedUrl.isEmpty) {
+    ApiClient.baseUrl = appState.settings.serverUrl;
+  }
+
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => AppState(),
+    ChangeNotifierProvider.value(
+      value: appState,
       child: const HomeLocusApp(),
     ),
   );

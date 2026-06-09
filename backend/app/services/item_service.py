@@ -7,7 +7,8 @@ from sqlalchemy.orm import selectinload
 
 from app.models.item import Item, ImageSnapshot
 from app.models.reminder import Reminder
-from app.models.space import Slot, Container, Zone
+from app.models.space import Slot, Container, Zone, Location
+from app.services.storage_service import storage_service
 from app.schemas import item as schemas
 from app.schemas import reminder as reminder_schemas
 from app.services.search_service import SearchService
@@ -71,6 +72,9 @@ class ItemService:
                 label=data.confirmed_label,
                 brand=data.brand,
                 category=data.category,
+                color=data.color,
+                purpose=data.purpose,
+                raw_recognition=data.raw_recognition or data.confirmed_label,
                 bounding_box=data.bounding_box,
                 thumbnail_path=data.thumbnail_path,
                 confidence=data.confidence,
@@ -90,6 +94,12 @@ class ItemService:
                 item.brand = data.brand
             if data.category is not None:
                 item.category = data.category
+            if data.color is not None:
+                item.color = data.color
+            if data.purpose is not None:
+                item.purpose = data.purpose
+            if data.raw_recognition is not None:
+                item.raw_recognition = data.raw_recognition
             if data.thumbnail_path is not None:
                 item.thumbnail_path = data.thumbnail_path
             if data.confidence is not None:
@@ -127,6 +137,10 @@ class ItemService:
             label=data.label,
             brand=data.brand,
             category=data.category,
+            color=data.color,
+            purpose=data.purpose,
+            raw_recognition=data.raw_recognition,
+            tags=data.tags or [],
             is_chargeable=data.is_chargeable_device,
             charge_cycle_days=data.charge_reminder_cycle_days,
             is_confirmed=True,
@@ -207,6 +221,61 @@ class ItemService:
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_gallery(
+        self,
+        location_id: str | None = None,
+        sort_by: str = "time",
+        descending: bool = True,
+        limit: int = 200,
+    ) -> list[schemas.GalleryItemResponse]:
+        stmt = (
+            select(ImageSnapshot, Slot, Container, Zone, Location)
+            .join(Slot, ImageSnapshot.slot_id == Slot.id)
+            .join(Container, Slot.container_id == Container.id)
+            .join(Zone, Container.zone_id == Zone.id)
+            .join(Location, Zone.location_id == Location.id)
+            .where(ImageSnapshot.original_path.isnot(None))
+        )
+        if location_id:
+            stmt = stmt.where(Location.id == location_id)
+        if sort_by == "space":
+            stmt = stmt.order_by(
+                Location.name.desc() if descending else Location.name.asc(),
+                Zone.name.desc() if descending else Zone.name.asc(),
+                Container.name.desc() if descending else Container.name.asc(),
+                Slot.name.desc() if descending else Slot.name.asc(),
+                ImageSnapshot.created_at.desc(),
+            )
+        else:
+            stmt = stmt.order_by(
+                ImageSnapshot.created_at.desc() if descending else ImageSnapshot.created_at.asc()
+            )
+        stmt = stmt.limit(limit)
+        result = await self.db.execute(stmt)
+        rows = result.all()
+        gallery: list[schemas.GalleryItemResponse] = []
+        for snap, slot, container, zone, loc in rows:
+            path = snap.compressed_path or snap.original_path
+            if not path or path.startswith("/tmp"):
+                continue
+            label = "拍照记录"
+            if snap.ai_response_raw and isinstance(snap.ai_response_raw, dict):
+                items = snap.ai_response_raw.get("items") or []
+                if items:
+                    label = items[0].get("label") or label
+            gallery.append(
+                schemas.GalleryItemResponse(
+                    id=snap.id,
+                    label=label,
+                    image_url=storage_service.get_presigned_url(path),
+                    thumbnail_url=storage_service.get_presigned_url(path),
+                    breadcrumb=f"{loc.name} / {zone.name} / {container.name} / {slot.name}",
+                    created_at=snap.created_at,
+                    slot_id=snap.slot_id,
+                )
+            )
+        return gallery
+
     def item_to_response(self, item: Item) -> schemas.ItemResponse:
         return schemas.ItemResponse(
             id=item.id,
@@ -214,6 +283,9 @@ class ItemService:
             label=item.label,
             brand=item.brand,
             category=item.category,
+            color=item.color,
+            purpose=item.purpose,
+            raw_recognition=item.raw_recognition,
             tags=item.tags or [],
             thumbnail_path=item.thumbnail_path,
             is_chargeable=item.is_chargeable,

@@ -51,15 +51,36 @@ def process_upload(self, task_id: str, filepath: str, slot_id: str):
     result = {"task_id": task_id, "status": "processing", "items": [], "summary": "", "ocr_texts": []}
 
     try:
-        orig_name = f"{slot_id}/originals/{uuid.uuid4().hex}.jpg"
+        from datetime import datetime
+        dated = datetime.utcnow().strftime("%Y/%m/%d")
+        orig_name = f"{dated}/{slot_id}/{uuid.uuid4().hex}.jpg"
         storage_service.upload_file(filepath, orig_name)
         result["original_url"] = storage_service.get_presigned_url(orig_name)
 
         compressed_buf = storage_service.compress_image(filepath)
-        comp_name = f"{slot_id}/compressed/{uuid.uuid4().hex}.jpg"
+        comp_name = f"{dated}/{slot_id}/{uuid.uuid4().hex}_cmp.jpg"
         storage_service.upload_bytes(compressed_buf.getvalue(), comp_name)
         result["compressed_url"] = storage_service.get_presigned_url(comp_name)
+        result["storage_original"] = orig_name
+        result["storage_compressed"] = comp_name
         logger.info(f"[{task_id}] Images stored")
+
+        try:
+            from sqlalchemy import create_engine
+            from sqlalchemy.orm import sessionmaker
+            from app.core.config import settings
+            from app.models.item import ImageSnapshot
+
+            engine = create_engine(settings.database_url_sync)
+            Session = sessionmaker(bind=engine)
+            with Session() as session:
+                snap = session.query(ImageSnapshot).filter_by(task_id=task_id).first()
+                if snap:
+                    snap.original_path = orig_name
+                    snap.compressed_path = comp_name
+                    session.commit()
+        except Exception as e:
+            logger.warning(f"[{task_id}] Failed to update snapshot paths: {e}")
 
         ocr_texts = ai_recognition.extract_text_sync(filepath)
         result["ocr_texts"] = ocr_texts

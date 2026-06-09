@@ -1,0 +1,21 @@
+# 生产环境仅部署图片上传网关（ASR 在本机 WG）
+services:
+  media-gateway:
+    image: homelocus-media-gateway:latest
+    ports:
+      - "127.0.0.1:8780:8780"
+    environment:
+      PUBLIC_BASE_URL: https://home.ajcheng.com:8443/media
+      MEDIA_GATEWAY_API_KEY: ${MEDIA_GATEWAY_API_KEY:-}
+      MAX_UPLOAD_MB: "20"
+    volumes:
+      - media_uploads:/data/media-gateway/uploads
+    restart: unless-stopped
+
+volumes:
+  media_uploads:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/HomeLocus/media-gateway

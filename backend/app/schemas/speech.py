@@ -14,11 +14,22 @@ class ParsedItem(BaseModel):
     label: str = ""
     brand: Optional[str] = None
     category: Optional[str] = None
+    color: Optional[str] = None
+    purpose: Optional[str] = None
     tags: list[str] = []
+    raw_recognition: Optional[str] = None
     is_chargeable: bool = False
     slot_name_hint: Optional[str] = None
     container_name_hint: Optional[str] = None
     zone_name_hint: Optional[str] = None
+
+
+class SaveVoiceItemRequest(BaseModel):
+    slot_id: str
+    text: str
+    label: Optional[str] = None
+    color: Optional[str] = None
+    tags: list[str] = []
 
 
 class MatchedSlot(BaseModel):

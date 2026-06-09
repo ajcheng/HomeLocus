@@ -16,6 +16,9 @@ class ConfirmItemRequest(BaseModel):
     bounding_box: Optional[dict] = None
     brand: Optional[str] = None
     category: Optional[str] = None
+    color: Optional[str] = None
+    purpose: Optional[str] = None
+    raw_recognition: Optional[str] = None
     thumbnail_path: Optional[str] = None
     confidence: Optional[float] = None
     is_chargeable_device: bool = False
@@ -27,6 +30,10 @@ class ManualItemCreate(BaseModel):
     label: str = Field(..., max_length=200)
     brand: Optional[str] = None
     category: Optional[str] = None
+    color: Optional[str] = None
+    purpose: Optional[str] = None
+    raw_recognition: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
     is_chargeable_device: bool = False
     charge_reminder_cycle_days: int = 90
 
@@ -53,12 +60,25 @@ class ArchiveByTagRequest(BaseModel):
     location_id: Optional[str] = None
 
 
+class GalleryItemResponse(BaseModel):
+    id: str
+    label: str
+    image_url: str
+    thumbnail_url: Optional[str] = None
+    breadcrumb: str
+    created_at: datetime
+    slot_id: str
+
+
 class ItemResponse(BaseModel):
     id: str
     slot_id: str
     label: str
     brand: Optional[str] = None
     category: Optional[str] = None
+    color: Optional[str] = None
+    purpose: Optional[str] = None
+    raw_recognition: Optional[str] = None
     tags: list = []
     thumbnail_path: Optional[str] = None
     is_chargeable: bool = False

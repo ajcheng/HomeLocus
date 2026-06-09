@@ -94,7 +94,7 @@ async def speech_transcribe(
         if not text:
             raise HTTPException(
                 status_code=503,
-                detail="语音识别失败：请确认生产环境已配置 AI_API_KEY，且 AI 服务支持 Whisper 接口 /v1/audio/transcriptions",
+                detail="语音识别失败：请确认 ASR 网关可访问（ASR_GATEWAY_URL）",
             )
         return {"text": text}
     finally:
@@ -106,9 +106,28 @@ async def confirm_speech_item(
     data: schemas.ConfirmedSpeechItem,
     svc: SpeechService = Depends(get_speech_service),
 ):
-    item = await svc.add_item_from_speech(data.parsed_item, data.slot_id)
+    item = await svc.add_item_from_speech(data.parsed_item, data.slot_id, data.transcription)
     return {
         "item_id": item.id,
         "label": item.label,
         "status": "created",
     }
+
+
+@router.post("/save-item")
+async def save_voice_item(
+    data: schemas.SaveVoiceItemRequest,
+    svc: SpeechService = Depends(get_speech_service),
+):
+    """与 app_local 一致：选定层级后直接保存语音解析结果。"""
+    from app.utils.voice_parser import parse_voice_text
+
+    parsed_local = parse_voice_text(data.text)
+    parsed = schemas.ParsedItem(
+        label=data.label or parsed_local.label or data.text,
+        color=data.color or parsed_local.color,
+        tags=data.tags or parsed_local.tags or [],
+        raw_recognition=data.text,
+    )
+    item = await svc.add_item_from_speech(parsed, data.slot_id, data.text)
+    return {"item_id": item.id, "label": item.label, "status": "created"}

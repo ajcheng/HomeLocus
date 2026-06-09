@@ -2,12 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app/app_state.dart';
 import '../services/api_client.dart';
+import '../services/item_media_store.dart';
 
 class RecognitionResultScreen extends StatefulWidget {
   final String taskId;
   final String slotId;
+  final String? localImagePath;
 
-  const RecognitionResultScreen({super.key, required this.taskId, required this.slotId});
+  const RecognitionResultScreen({
+    super.key,
+    required this.taskId,
+    required this.slotId,
+    this.localImagePath,
+  });
 
   @override
   State<RecognitionResultScreen> createState() => _RecognitionResultScreenState();
@@ -15,6 +22,7 @@ class RecognitionResultScreen extends StatefulWidget {
 
 class _RecognitionResultScreenState extends State<RecognitionResultScreen> {
   final _api = ApiClient();
+  final _mediaStore = ItemMediaStore();
   List<Map<String, dynamic>> _items = [];
   bool _loading = true;
   bool _submitting = false;
@@ -61,6 +69,9 @@ class _RecognitionResultScreenState extends State<RecognitionResultScreen> {
         'bounding_box': item['bounding_box'],
         'brand': item['brand'],
         'category': item['category'],
+        'color': item['color'],
+        'purpose': item['purpose'],
+        'raw_recognition': item['ai_label_raw'] ?? item['label'],
         'thumbnail_path': item['thumbnail_path'],
         'confidence': item['confidence'],
         'is_chargeable_device': item['is_chargeable'] == true,
@@ -87,6 +98,10 @@ class _RecognitionResultScreenState extends State<RecognitionResultScreen> {
         'is_chargeable_device': item['is_chargeable'] == true,
         'charge_reminder_cycle_days': 90,
       });
+      final itemId = item['id']?.toString();
+      if (itemId != null && widget.localImagePath != null) {
+        await _mediaStore.link(itemId: itemId, imagePath: widget.localImagePath);
+      }
       setState(() => item['_confirmed'] = true);
       return true;
     } catch (e) {
@@ -191,6 +206,10 @@ class _RecognitionResultScreenState extends State<RecognitionResultScreen> {
         success = result.length;
         for (final i in pending) {
           _items[i]['_confirmed'] = true;
+          final itemId = _items[i]['id']?.toString();
+          if (itemId != null && widget.localImagePath != null) {
+            await _mediaStore.link(itemId: itemId, imagePath: widget.localImagePath);
+          }
         }
       }
     } catch (_) {

@@ -38,6 +38,7 @@ ssh "$TARGET" bash -s <<'REMOTE'
 set -e
 sudo docker load -i /tmp/homelocus-backend.tar
 cd /root/HomeLocus
+sudo docker compose -f docker/docker-compose.yml up -d meilisearch qdrant
 sudo docker compose -f docker/docker-compose.yml up -d --force-recreate backend celery-worker celery-beat
 echo "=== 5. 数据库迁移 ==="
 sudo docker compose -f docker/docker-compose.yml exec -T \

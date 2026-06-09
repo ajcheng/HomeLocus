@@ -82,6 +82,17 @@ async def get_task_status(task_id: str, svc: ItemService = Depends(get_item_serv
     return schemas.TaskStatusResponse(task_id=task_id, status="processing")
 
 
+@router.get("/gallery", response_model=list[schemas.GalleryItemResponse])
+async def list_gallery(
+    location_id: str | None = None,
+    sort_by: str = "time",
+    descending: bool = True,
+    limit: int = 200,
+    svc: ItemService = Depends(get_item_service),
+):
+    return await svc.list_gallery(location_id, sort_by, descending, limit)
+
+
 @router.get("/slot/{slot_id}", response_model=list[schemas.ItemResponse])
 async def list_slot_items(slot_id: str, svc: ItemService = Depends(get_item_service)):
     """List all items in a storage slot (for space browser)."""

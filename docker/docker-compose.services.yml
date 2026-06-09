@@ -1,0 +1,35 @@
+# 纯本地 App 配套轻量网关（图片上传 + 语音识别）
+# 与主 backend 独立部署，经 Nginx /media/ 与 /asr/ 反代
+services:
+  media-gateway:
+    build: ../services/media-gateway
+    image: homelocus-media-gateway:latest
+    ports:
+      - "127.0.0.1:8780:8780"
+    environment:
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://home.ajcheng.com:8443/media}
+      MEDIA_GATEWAY_API_KEY: ${MEDIA_GATEWAY_API_KEY:-}
+      MAX_UPLOAD_MB: "20"
+    volumes:
+      - media_uploads:/data/media-gateway/uploads
+    restart: unless-stopped
+
+  asr-gateway:
+    build: ../services/asr-gateway
+    image: homelocus-asr-gateway:latest
+    ports:
+      - "127.0.0.1:8781:8781"
+    environment:
+      ASR_BACKEND: ${ASR_BACKEND:-mock}
+      ASR_MODEL_DIR: ${ASR_MODEL_DIR:-}
+      ASR_LANGUAGE: zh
+      ASR_GATEWAY_API_KEY: ${ASR_GATEWAY_API_KEY:-}
+    restart: unless-stopped
+
+volumes:
+  media_uploads:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/HomeLocus/media-gateway
