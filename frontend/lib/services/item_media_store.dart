@@ -77,4 +77,19 @@ class ItemMediaStore {
     if (media?.audioPath == null) return false;
     return File(media!.audioPath!).exists();
   }
+
+  Future<Map<String, ItemMedia>> listAll() => _loadMap();
+
+  /// imagePath -> itemId
+  Future<Map<String, String>> imagePathToItemId() async {
+    final map = await _loadMap();
+    final out = <String, String>{};
+    for (final entry in map.entries) {
+      final path = entry.value.imagePath;
+      if (path != null && path.isNotEmpty) {
+        out[path] = entry.key;
+      }
+    }
+    return out;
+  }
 }

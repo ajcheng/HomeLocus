@@ -12,6 +12,7 @@ from app.services.storage_service import storage_service
 from app.schemas import item as schemas
 from app.schemas import reminder as reminder_schemas
 from app.services.search_service import SearchService
+from app.utils.search_synonyms import search_tags_for_item
 from app.services.reminder_service import ReminderService
 
 
@@ -107,6 +108,12 @@ class ItemService:
             item.is_chargeable = data.is_chargeable_device
             item.charge_cycle_days = data.charge_reminder_cycle_days
             item.is_confirmed = True
+        item.tags = search_tags_for_item(
+            item.label,
+            item.brand,
+            item.category,
+            item.tags if isinstance(item.tags, list) else [],
+        )
         await self.db.commit()
         await self.db.refresh(item)
         await SearchService(self.db).index_item_record(item)
@@ -140,7 +147,12 @@ class ItemService:
             color=data.color,
             purpose=data.purpose,
             raw_recognition=data.raw_recognition,
-            tags=data.tags or [],
+            tags=search_tags_for_item(
+                data.label,
+                data.brand,
+                data.category,
+                data.tags or [],
+            ),
             is_chargeable=data.is_chargeable_device,
             charge_cycle_days=data.charge_reminder_cycle_days,
             is_confirmed=True,
@@ -211,6 +223,38 @@ class ItemService:
             svc.delete_item_index(item.id)
         await self.db.commit()
         return len(items)
+
+    async def lookup_items(self, item_ids: list[str]) -> list[dict]:
+        """按 ID 批量查询物品摘要（供本机图库关联展示）。"""
+        if not item_ids:
+            return []
+        stmt = (
+            select(Item, Slot, Container, Zone, Location)
+            .outerjoin(Slot, Item.slot_id == Slot.id)
+            .outerjoin(Container, Slot.container_id == Container.id)
+            .outerjoin(Zone, Container.zone_id == Zone.id)
+            .outerjoin(Location, Zone.location_id == Location.id)
+            .where(Item.id.in_(item_ids), Item.is_deleted == False)
+        )
+        result = await self.db.execute(stmt)
+        rows = result.all()
+        out: list[dict] = []
+        for item, slot, container, zone, loc in rows:
+            breadcrumb = (
+                f"{loc.name} / {zone.name} / {container.name} / {slot.name}"
+                if slot and container and zone and loc
+                else "位置已删除"
+            )
+            out.append(
+                {
+                    "id": item.id,
+                    "label": item.label,
+                    "breadcrumb": breadcrumb,
+                    "created_at": item.created_at.isoformat() if item.created_at else None,
+                    "location_id": loc.id if loc else None,
+                }
+            )
+        return out
 
     async def get_slot_items(self, slot_id: str) -> list[Item]:
         stmt = (

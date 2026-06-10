@@ -60,6 +60,10 @@ class ArchiveByTagRequest(BaseModel):
     location_id: Optional[str] = None
 
 
+class ItemLookupRequest(BaseModel):
+    ids: list[str] = Field(default_factory=list)
+
+
 class GalleryItemResponse(BaseModel):
     id: str
     label: str

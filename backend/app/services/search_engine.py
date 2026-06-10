@@ -51,7 +51,7 @@ class SearchEngine:
             self.meili.create_index("items", {"primaryKey": "id"})
             self.meili.index("items").update_filterable_attributes(["location_id", "category", "labels"])
             self.meili.index("items").update_searchable_attributes(
-                ["label", "brand", "category", "tags", "ocr_text"]
+                ["label", "brand", "category", "tags", "ocr_text", "color", "purpose", "raw_recognition"]
             )
 
     def index_text(
@@ -63,6 +63,9 @@ class SearchEngine:
         ocr_text: str,
         location_id: str,
         category: str | None = None,
+        color: str | None = None,
+        purpose: str | None = None,
+        raw_recognition: str | None = None,
     ):
         """Index an item's text metadata in Meilisearch."""
         doc = {
@@ -73,6 +76,9 @@ class SearchEngine:
             "tags": tags or [],
             "ocr_text": ocr_text,
             "location_id": location_id,
+            "color": color or "",
+            "purpose": purpose or "",
+            "raw_recognition": raw_recognition or "",
         }
         if not self.meili_enabled:
             return

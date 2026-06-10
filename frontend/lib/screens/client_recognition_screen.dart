@@ -9,6 +9,7 @@ import '../services/item_media_store.dart';
 import '../services/media_gateway_service.dart';
 import '../services/vision_service.dart';
 import '../widgets/item_image.dart';
+import '../widgets/item_entry_fields.dart';
 
 /// 使用本机自定义网关配置进行图像识别（与单机版流程一致）
 class ClientRecognitionScreen extends StatefulWidget {
@@ -25,6 +26,34 @@ class ClientRecognitionScreen extends StatefulWidget {
   State<ClientRecognitionScreen> createState() => _ClientRecognitionScreenState();
 }
 
+class _ItemEditors {
+  final TextEditingController labelCtrl;
+  final TextEditingController brandCtrl;
+  final TextEditingController categoryCtrl;
+  final TextEditingController colorCtrl;
+
+  _ItemEditors({
+    required this.labelCtrl,
+    required this.brandCtrl,
+    required this.categoryCtrl,
+    required this.colorCtrl,
+  });
+
+  factory _ItemEditors.fromVision(VisionItem v) => _ItemEditors(
+        labelCtrl: TextEditingController(text: v.label),
+        brandCtrl: TextEditingController(text: v.brand ?? ''),
+        categoryCtrl: TextEditingController(text: v.category ?? ''),
+        colorCtrl: TextEditingController(text: v.color ?? ''),
+      );
+
+  void dispose() {
+    labelCtrl.dispose();
+    brandCtrl.dispose();
+    categoryCtrl.dispose();
+    colorCtrl.dispose();
+  }
+}
+
 class _ClientRecognitionScreenState extends State<ClientRecognitionScreen> {
   final _api = ApiClient();
   final _media = MediaGatewayService();
@@ -34,6 +63,7 @@ class _ClientRecognitionScreenState extends State<ClientRecognitionScreen> {
   String? _remoteUrl;
   List<VisionItem> _detected = [];
   final Set<int> _selected = {};
+  final List<_ItemEditors> _editors = [];
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -43,6 +73,23 @@ class _ClientRecognitionScreenState extends State<ClientRecognitionScreen> {
   void initState() {
     super.initState();
     _recognize();
+  }
+
+  @override
+  void dispose() {
+    for (final e in _editors) {
+      e.dispose();
+    }
+    super.dispose();
+  }
+
+  void _resetEditors() {
+    for (final e in _editors) {
+      e.dispose();
+    }
+    _editors
+      ..clear()
+      ..addAll(_detected.map(_ItemEditors.fromVision));
   }
 
   Future<void> _recognize() async {
@@ -61,7 +108,8 @@ class _ClientRecognitionScreenState extends State<ClientRecognitionScreen> {
       setState(() => _status = '调用视觉大模型识别…');
       _detected = await _vision.recognize(_remoteUrl!, config);
       _selected.addAll(List.generate(_detected.length, (i) => i));
-      setState(() => _status = '识别完成，请确认入库');
+      _resetEditors();
+      setState(() => _status = '识别完成，请编辑后确认入库');
     } catch (e) {
       setState(() => _error = '$e');
     }
@@ -79,13 +127,16 @@ class _ClientRecognitionScreenState extends State<ClientRecognitionScreen> {
     var saved = 0;
     try {
       for (final i in _selected) {
+        final editor = _editors[i];
+        final label = editor.labelCtrl.text.trim();
+        if (label.isEmpty) continue;
         final v = _detected[i];
         final data = await _api.post('/items/manual', body: {
           'slot_id': widget.slotId,
-          'label': v.label,
-          'brand': v.brand,
-          'category': v.category,
-          'color': v.color,
+          'label': label,
+          'brand': editor.brandCtrl.text.trim().isEmpty ? null : editor.brandCtrl.text.trim(),
+          'category': editor.categoryCtrl.text.trim().isEmpty ? null : editor.categoryCtrl.text.trim(),
+          'color': editor.colorCtrl.text.trim().isEmpty ? null : editor.colorCtrl.text.trim(),
           'purpose': v.purpose,
           'raw_recognition': v.rawText,
         });
@@ -156,8 +207,8 @@ class _ClientRecognitionScreenState extends State<ClientRecognitionScreen> {
                     label: const Text('重新识别'),
                   )
                 else ...[
-                  const Text('识别结果（勾选后存入云端）', style: TextStyle(fontWeight: FontWeight.bold)),
-                  for (var i = 0; i < _detected.length; i++)
+                  const Text('识别结果（可编辑，勾选后存入云端）', style: TextStyle(fontWeight: FontWeight.bold)),
+                  for (var i = 0; i < _detected.length; i++) ...[
                     CheckboxListTile(
                       value: _selected.contains(i),
                       onChanged: (v) => setState(() {
@@ -167,13 +218,20 @@ class _ClientRecognitionScreenState extends State<ClientRecognitionScreen> {
                           _selected.remove(i);
                         }
                       }),
-                      title: Text(_detected[i].label),
-                      subtitle: Text([
-                        if (_detected[i].brand != null) '品牌: ${_detected[i].brand}',
-                        if (_detected[i].color != null) '颜色: ${_detected[i].color}',
-                        if (_detected[i].category != null) '分类: ${_detected[i].category}',
-                      ].join(' · ')),
+                      title: Text('物品 ${i + 1}'),
+                      controlAffinity: ListTileControlAffinity.leading,
                     ),
+                    if (_selected.contains(i) && i < _editors.length)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8, right: 8, bottom: 8),
+                        child: ItemEntryFields(
+                          labelCtrl: _editors[i].labelCtrl,
+                          brandCtrl: _editors[i].brandCtrl,
+                          categoryCtrl: _editors[i].categoryCtrl,
+                          colorCtrl: _editors[i].colorCtrl,
+                        ),
+                      ),
+                  ],
                   const SizedBox(height: 12),
                   FilledButton(
                     onPressed: _saving ? null : _confirm,

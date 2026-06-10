@@ -125,6 +125,8 @@ async def save_voice_item(
     parsed_local = parse_voice_text(data.text)
     parsed = schemas.ParsedItem(
         label=data.label or parsed_local.label or data.text,
+        brand=data.brand,
+        category=data.category,
         color=data.color or parsed_local.color,
         tags=data.tags or parsed_local.tags or [],
         raw_recognition=data.text,

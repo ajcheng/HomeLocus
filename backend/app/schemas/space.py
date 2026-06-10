@@ -10,6 +10,10 @@ class LocationCreate(BaseModel):
     is_default: bool = False
 
 
+class LocationUpdate(BaseModel):
+    name: str = Field(..., max_length=100)
+
+
 class LocationResponse(BaseModel):
     id: str
     name: str
@@ -27,6 +31,10 @@ class ZoneCreate(BaseModel):
     location_id: str
     name: str = Field(..., max_length=100)
     template_type: Optional[str] = None
+
+
+class ZoneUpdate(BaseModel):
+    name: str = Field(..., max_length=100)
 
 
 class ZoneResponse(BaseModel):
@@ -48,6 +56,10 @@ class ContainerCreate(BaseModel):
     zone_id: str
     name: str = Field(..., max_length=100)
     slots: list[SlotCreate] = []
+
+
+class ContainerUpdate(BaseModel):
+    name: str = Field(..., max_length=100)
 
 
 class ContainerResponse(BaseModel):

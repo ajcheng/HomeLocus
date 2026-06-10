@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../app/app_state.dart';
 import '../services/api_client.dart';
 import '../services/item_media_store.dart';
+import '../widgets/item_entry_fields.dart';
 
 class RecognitionResultScreen extends StatefulWidget {
   final String taskId;
@@ -20,10 +21,50 @@ class RecognitionResultScreen extends StatefulWidget {
   State<RecognitionResultScreen> createState() => _RecognitionResultScreenState();
 }
 
+class _ItemEditors {
+  final TextEditingController labelCtrl;
+  final TextEditingController brandCtrl;
+  final TextEditingController categoryCtrl;
+  final TextEditingController colorCtrl;
+  bool chargeable;
+
+  _ItemEditors({
+    required this.labelCtrl,
+    required this.brandCtrl,
+    required this.categoryCtrl,
+    required this.colorCtrl,
+    required this.chargeable,
+  });
+
+  factory _ItemEditors.fromItem(Map<String, dynamic> item) => _ItemEditors(
+        labelCtrl: TextEditingController(text: item['label']?.toString() ?? ''),
+        brandCtrl: TextEditingController(text: item['brand']?.toString() ?? ''),
+        categoryCtrl: TextEditingController(text: item['category']?.toString() ?? ''),
+        colorCtrl: TextEditingController(text: item['color']?.toString() ?? ''),
+        chargeable: item['is_chargeable'] == true,
+      );
+
+  void applyTo(Map<String, dynamic> item) {
+    item['label'] = labelCtrl.text.trim();
+    item['brand'] = brandCtrl.text.trim().isEmpty ? null : brandCtrl.text.trim();
+    item['category'] = categoryCtrl.text.trim().isEmpty ? null : categoryCtrl.text.trim();
+    item['color'] = colorCtrl.text.trim().isEmpty ? null : colorCtrl.text.trim();
+    item['is_chargeable'] = chargeable;
+  }
+
+  void dispose() {
+    labelCtrl.dispose();
+    brandCtrl.dispose();
+    categoryCtrl.dispose();
+    colorCtrl.dispose();
+  }
+}
+
 class _RecognitionResultScreenState extends State<RecognitionResultScreen> {
   final _api = ApiClient();
   final _mediaStore = ItemMediaStore();
   List<Map<String, dynamic>> _items = [];
+  final Map<int, _ItemEditors> _editors = {};
   bool _loading = true;
   bool _submitting = false;
 
@@ -36,6 +77,24 @@ class _RecognitionResultScreenState extends State<RecognitionResultScreen> {
     _pollTask();
   }
 
+  @override
+  void dispose() {
+    for (final e in _editors.values) {
+      e.dispose();
+    }
+    super.dispose();
+  }
+
+  void _resetEditors() {
+    for (final e in _editors.values) {
+      e.dispose();
+    }
+    _editors.clear();
+    for (var i = 0; i < _items.length; i++) {
+      _editors[i] = _ItemEditors.fromItem(_items[i]);
+    }
+  }
+
   Future<void> _pollTask() async {
     for (var i = 0; i < 90; i++) {
       await Future.delayed(const Duration(seconds: 2));
@@ -46,7 +105,11 @@ class _RecognitionResultScreenState extends State<RecognitionResultScreen> {
           for (final it in items) {
             it['_confirmed'] = false;
           }
-          setState(() { _items = items; _loading = false; });
+          setState(() {
+            _items = items;
+            _loading = false;
+          });
+          _resetEditors();
           return;
         } else if (data['status'] == 'failed') {
           setState(() => _loading = false);
@@ -78,12 +141,21 @@ class _RecognitionResultScreenState extends State<RecognitionResultScreen> {
         'charge_reminder_cycle_days': 90,
       };
 
-  Future<bool> _confirmOne(int index, {String? labelOverride}) async {
+  Future<bool> _confirmOne(int index) async {
     final item = _items[index];
     if (item['_confirmed'] == true) return true;
 
-    if (labelOverride != null) {
-      item['label'] = labelOverride;
+    final editor = _editors[index];
+    if (editor != null) {
+      editor.applyTo(item);
+    }
+    if ((item['label']?.toString() ?? '').trim().isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('请填写物品名称')),
+        );
+      }
+      return false;
     }
 
     try {
@@ -93,6 +165,9 @@ class _RecognitionResultScreenState extends State<RecognitionResultScreen> {
         'bounding_box': item['bounding_box'],
         'brand': item['brand'],
         'category': item['category'],
+        'color': item['color'],
+        'purpose': item['purpose'],
+        'raw_recognition': item['ai_label_raw'] ?? item['label'],
         'thumbnail_path': item['thumbnail_path'],
         'confidence': item['confidence'],
         'is_chargeable_device': item['is_chargeable'] == true,
@@ -112,60 +187,16 @@ class _RecognitionResultScreenState extends State<RecognitionResultScreen> {
     }
   }
 
-  Future<void> _confirmItemDialog(int index) async {
+  Future<void> _confirmItem(int index) async {
     final item = _items[index];
     if (item['_confirmed'] == true) return;
-
-    final ctrl = TextEditingController(text: item['label']?.toString() ?? '');
-    var chargeable = item['is_chargeable'] == true;
-
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialog) => AlertDialog(
-          title: const Text('确认入库'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: ctrl,
-                decoration: const InputDecoration(labelText: '物品名称'),
-              ),
-              const SizedBox(height: 8),
-              if (item['brand'] != null) Text('品牌: ${item['brand']}'),
-              if (item['category'] != null) Text('分类: ${item['category']}'),
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                value: chargeable,
-                title: const Text('需充电设备'),
-                onChanged: (v) => setDialog(() {
-                  chargeable = v ?? false;
-                  item['is_chargeable'] = chargeable;
-                }),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('确认入库'),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (ok == true) {
-      item['is_chargeable'] = chargeable;
-      final success = await _confirmOne(index, labelOverride: ctrl.text.trim());
-      if (success && mounted) {
-        context.read<AppState>().refreshSearchItems();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已入库：${ctrl.text.trim()}')),
-        );
-      }
+    final success = await _confirmOne(index);
+    if (success && mounted) {
+      context.read<AppState>().refreshSearchItems();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已入库：${item['label']}')),
+      );
+      setState(() {});
     }
   }
 
@@ -197,6 +228,9 @@ class _RecognitionResultScreenState extends State<RecognitionResultScreen> {
     setState(() => _submitting = true);
     var success = 0;
     try {
+      for (final i in pending) {
+        _editors[i]?.applyTo(_items[i]);
+      }
       final batchItems = pending.map((i) => _confirmBody(_items[i])).toList();
       final result = await _api.post('/items/confirm-batch', body: {
         'slot_id': widget.slotId,
@@ -281,38 +315,66 @@ class _RecognitionResultScreenState extends State<RecognitionResultScreen> {
                         itemBuilder: (ctx, i) {
                           final item = _items[i];
                           final confirmed = item['_confirmed'] == true;
+                          final editor = _editors[i];
                           return Card(
                             color: confirmed ? Colors.green.shade50 : null,
                             margin: const EdgeInsets.only(bottom: 8),
-                            child: ListTile(
-                              leading: item['thumbnail_url'] != null
-                                  ? Image.network(
-                                      item['thumbnail_url'],
-                                      width: 60,
-                                      height: 60,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) => const Icon(Icons.image, size: 48),
-                                    )
-                                  : const Icon(Icons.image, size: 48),
-                              title: Text(
-                                item['label'] ?? '未知物品',
-                                style: TextStyle(
-                                  decoration: confirmed ? null : TextDecoration.none,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              subtitle: Text([
-                                if (item['brand'] != null) '品牌: ${item['brand']}',
-                                if (item['category'] != null) item['category'],
-                                '置信度: ${((item['confidence'] ?? 0) * 100).toStringAsFixed(0)}%',
-                                if (confirmed) '✓ 已入库',
-                              ].join(' | ')),
-                              trailing: confirmed
-                                  ? const Icon(Icons.check_circle, color: Colors.green)
-                                  : FilledButton.tonal(
-                                      onPressed: _submitting ? null : () => _confirmItemDialog(i),
-                                      child: const Text('确认'),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Row(
+                                    children: [
+                                      if (item['thumbnail_url'] != null)
+                                        ClipRRect(
+                                          borderRadius: BorderRadius.circular(6),
+                                          child: Image.network(
+                                            item['thumbnail_url'],
+                                            width: 56,
+                                            height: 56,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (_, __, ___) =>
+                                                const Icon(Icons.image, size: 40),
+                                          ),
+                                        )
+                                      else
+                                        const Icon(Icons.image, size: 40),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          confirmed
+                                              ? (item['label'] ?? '未知物品')
+                                              : '识别结果 ${i + 1} · 置信度 ${((item['confidence'] ?? 0) * 100).toStringAsFixed(0)}%',
+                                          style: const TextStyle(fontWeight: FontWeight.w600),
+                                        ),
+                                      ),
+                                      if (confirmed)
+                                        const Icon(Icons.check_circle, color: Colors.green),
+                                    ],
+                                  ),
+                                  if (!confirmed && editor != null) ...[
+                                    const SizedBox(height: 8),
+                                    ItemEntryFields(
+                                      labelCtrl: editor.labelCtrl,
+                                      brandCtrl: editor.brandCtrl,
+                                      categoryCtrl: editor.categoryCtrl,
+                                      colorCtrl: editor.colorCtrl,
+                                      showChargeable: true,
+                                      chargeable: editor.chargeable,
+                                      onChargeableChanged: (v) => setState(() => editor.chargeable = v),
                                     ),
+                                    const SizedBox(height: 8),
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: FilledButton.tonal(
+                                        onPressed: _submitting ? null : () => _confirmItem(i),
+                                        child: const Text('确认入库'),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
                             ),
                           );
                         },

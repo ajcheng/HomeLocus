@@ -29,6 +29,20 @@ async def list_locations(
     return await svc.list_locations(user_id=user.id)
 
 
+@router.put("/locations/{location_id}", response_model=schemas.LocationResponse)
+async def update_location(
+    location_id: str,
+    data: schemas.LocationUpdate,
+    svc: SpaceService = Depends(get_space_service),
+):
+    loc = await svc.update_location(location_id, data.name)
+    if not loc:
+        raise HTTPException(status_code=404, detail="Location not found")
+    return schemas.LocationResponse(
+        id=loc.id, name=loc.name, is_default=loc.is_default, created_at=loc.created_at, zone_count=0
+    )
+
+
 @router.delete("/locations/{location_id}")
 async def delete_location(location_id: str, svc: SpaceService = Depends(get_space_service)):
     ok = await svc.delete_location(location_id)
@@ -63,6 +77,49 @@ async def list_zones(location_id: str | None = None, svc: SpaceService = Depends
     return [schemas.ZoneResponse(id=z.id, location_id=z.location_id, name=z.name, template_type=z.template_type) for z in zones]
 
 
+@router.put("/zones/{zone_id}", response_model=schemas.ZoneResponse)
+async def update_zone(
+    zone_id: str,
+    data: schemas.ZoneUpdate,
+    svc: SpaceService = Depends(get_space_service),
+):
+    zone = await svc.update_zone(zone_id, data.name)
+    if not zone:
+        raise HTTPException(status_code=404, detail="Zone not found")
+    return schemas.ZoneResponse(
+        id=zone.id, location_id=zone.location_id, name=zone.name, template_type=zone.template_type
+    )
+
+
+@router.delete("/zones/{zone_id}")
+async def delete_zone(zone_id: str, svc: SpaceService = Depends(get_space_service)):
+    ok = await svc.delete_zone(zone_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Zone not found")
+    return {"status": "deleted"}
+
+
+@router.get("/item-count")
+async def item_count(
+    location_id: str | None = None,
+    zone_id: str | None = None,
+    container_id: str | None = None,
+    slot_id: str | None = None,
+    svc: SpaceService = Depends(get_space_service),
+):
+    if slot_id:
+        count = await svc.count_items_for_slot(slot_id)
+    elif container_id:
+        count = await svc.count_items_for_container(container_id)
+    elif zone_id:
+        count = await svc.count_items_for_zone(zone_id)
+    elif location_id:
+        count = await svc.count_items_for_location(location_id)
+    else:
+        raise HTTPException(status_code=400, detail="Provide location_id, zone_id, container_id, or slot_id")
+    return {"count": count}
+
+
 # ---- Container ----
 @router.post("/containers", response_model=schemas.ContainerResponse, status_code=201)
 async def create_container(data: schemas.ContainerCreate, svc: SpaceService = Depends(get_space_service)):
@@ -82,6 +139,26 @@ async def get_container(container_id: str, svc: SpaceService = Depends(get_space
     if not container:
         raise HTTPException(status_code=404, detail="Container not found")
     return _build_container_response(container)
+
+
+@router.put("/containers/{container_id}", response_model=schemas.ContainerResponse)
+async def update_container(
+    container_id: str,
+    data: schemas.ContainerUpdate,
+    svc: SpaceService = Depends(get_space_service),
+):
+    container = await svc.update_container(container_id, data.name)
+    if not container:
+        raise HTTPException(status_code=404, detail="Container not found")
+    return _build_container_response(container)
+
+
+@router.delete("/containers/{container_id}")
+async def delete_container(container_id: str, svc: SpaceService = Depends(get_space_service)):
+    ok = await svc.delete_container(container_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Container not found")
+    return {"status": "deleted"}
 
 
 # ---- Slot ----

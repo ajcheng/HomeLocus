@@ -11,6 +11,7 @@ import '../services/asr_service.dart';
 import '../services/item_media_store.dart';
 import '../services/local_file_service.dart';
 import '../utils/voice_parser.dart';
+import '../widgets/item_entry_fields.dart';
 
 class VoiceInputScreen extends StatefulWidget {
   final String locationId;
@@ -33,6 +34,10 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
   String? _lastAudioPath;
   String? _selectedSlotId;
   List<Map<String, dynamic>> _slots = [];
+  final _labelCtrl = TextEditingController();
+  final _brandCtrl = TextEditingController();
+  final _categoryCtrl = TextEditingController();
+  final _colorCtrl = TextEditingController();
 
   String get _effectiveLocationId {
     if (widget.locationId.isNotEmpty) return widget.locationId;
@@ -43,6 +48,23 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadSlots());
+  }
+
+  @override
+  void dispose() {
+    _labelCtrl.dispose();
+    _brandCtrl.dispose();
+    _categoryCtrl.dispose();
+    _colorCtrl.dispose();
+    super.dispose();
+  }
+
+  void _applyParsedFields() {
+    if (_text == null) return;
+    final parsed = parseVoiceText(_text!);
+    _labelCtrl.text = parsed.label;
+    _brandCtrl.text = '';
+    _colorCtrl.text = parsed.color ?? '';
   }
 
   Future<void> _loadSlots() async {
@@ -112,20 +134,35 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
     } catch (e) {
       _text = '识别失败: $e';
     }
+    _applyParsedFields();
     setState(() => _loading = false);
   }
 
   Future<void> _saveAsItem() async {
     if (_text == null || _text!.trim().isEmpty || _selectedSlotId == null) return;
+    final label = _labelCtrl.text.trim();
+    if (label.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请填写物品名称')),
+      );
+      return;
+    }
     final parsed = parseVoiceText(_text!);
+    final tags = <String>{...parsed.tags, label};
+    final brand = _brandCtrl.text.trim();
+    final color = _colorCtrl.text.trim();
+    if (brand.isNotEmpty) tags.add(brand);
+    if (color.isNotEmpty) tags.add(color);
     setState(() => _loading = true);
     try {
       final data = await _api.post('/speech/save-item', body: {
         'slot_id': _selectedSlotId,
         'text': _text,
-        'label': parsed.label,
-        'color': parsed.color,
-        'tags': parsed.tags,
+        'label': label,
+        'brand': brand.isEmpty ? null : brand,
+        'category': _categoryCtrl.text.trim().isEmpty ? null : _categoryCtrl.text.trim(),
+        'color': color.isEmpty ? null : color,
+        'tags': tags.take(10).toList(),
       });
       final itemId = data is Map ? data['item_id']?.toString() : null;
       if (itemId != null && _lastAudioPath != null) {
@@ -134,7 +171,7 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
       if (mounted) {
         context.read<AppState>().refreshSearchItems();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已添加: ${parsed.label}${parsed.color != null ? '（${parsed.color}）' : ''}')),
+          SnackBar(content: Text('已添加: $label${color.isNotEmpty ? '（$color）' : ''}')),
         );
         Navigator.pop(context);
       }
@@ -181,21 +218,20 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
             if (_loading) const LinearProgressIndicator(),
             const SizedBox(height: 16),
             if (_text != null) ...[
-              const Text('识别结果', style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text('识别原文', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(_text!))),
+              const SizedBox(height: 12),
+              const Text('编辑后入库', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              Builder(
-                builder: (_) {
-                  final p = parseVoiceText(_text!);
-                  return Text(
-                    '将保存为：${p.label}${p.color != null ? '（${p.color}）' : ''}',
-                    style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
-                  );
-                },
+              ItemEntryFields(
+                labelCtrl: _labelCtrl,
+                brandCtrl: _brandCtrl,
+                categoryCtrl: _categoryCtrl,
+                colorCtrl: _colorCtrl,
               ),
               const SizedBox(height: 12),
-              FilledButton(onPressed: _saveAsItem, child: const Text('保存为物品')),
+              FilledButton(onPressed: _loading ? null : _saveAsItem, child: const Text('确认入库')),
             ],
             const Spacer(),
             Text(

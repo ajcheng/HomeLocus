@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app/app_state.dart';
 import '../services/api_client.dart';
+import '../utils/space_actions.dart';
 import 'floor_plan_screen.dart';
 
 class SpaceScreen extends StatefulWidget {
@@ -76,6 +77,20 @@ class _SpaceScreenState extends State<SpaceScreen> {
       _load();
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  Future<int> _itemCount({String? locationId, String? zoneId, String? containerId, String? slotId}) async {
+    final params = <String>[];
+    if (slotId != null) params.add('slot_id=$slotId');
+    if (containerId != null) params.add('container_id=$containerId');
+    if (zoneId != null) params.add('zone_id=$zoneId');
+    if (locationId != null) params.add('location_id=$locationId');
+    try {
+      final data = await _api.get('/space/item-count?${params.join('&')}');
+      return (data['count'] as num?)?.toInt() ?? 0;
+    } catch (_) {
+      return 0;
     }
   }
 
@@ -213,6 +228,13 @@ class _SpaceScreenState extends State<SpaceScreen> {
                               ),
                             ],
                           ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                          child: Text(
+                            '结构：地点 / 分区 / 模块 / 层级（长按重命名或删除）',
+                            style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                          ),
+                        ),
                         Expanded(
                           child: RefreshIndicator(
                             onRefresh: _load,
@@ -224,6 +246,7 @@ class _SpaceScreenState extends State<SpaceScreen> {
                                       return _LocationTile(
                                         loc: loc,
                                         api: _api,
+                                        itemCount: _itemCount,
                                         onRefresh: _load,
                                         onApplyTemplate: () => _applyTemplate(loc['id']),
                                         initiallyExpanded: true,
@@ -246,6 +269,7 @@ class _SpaceScreenState extends State<SpaceScreen> {
 class _LocationTile extends StatefulWidget {
   final dynamic loc;
   final ApiClient api;
+  final Future<int> Function({String? locationId, String? zoneId, String? containerId, String? slotId}) itemCount;
   final VoidCallback onRefresh;
   final VoidCallback onApplyTemplate;
   final bool initiallyExpanded;
@@ -257,6 +281,7 @@ class _LocationTile extends StatefulWidget {
   const _LocationTile({
     required this.loc,
     required this.api,
+    required this.itemCount,
     required this.onRefresh,
     required this.onApplyTemplate,
     this.initiallyExpanded = false,
@@ -291,26 +316,32 @@ class _LocationTileState extends State<_LocationTile> {
     }
   }
 
-  Future<void> _deleteLocation() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('删除地点'),
-        content: Text('确定删除「${widget.loc['name']}」及其所有分区、储物模块和物品？此操作不可恢复。'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          FilledButton(style: FilledButton.styleFrom(backgroundColor: Colors.red), onPressed: () => Navigator.pop(ctx, true), child: const Text('删除')),
-        ],
-      ),
-    );
-    if (ok == true) {
-      try {
-        await widget.api.delete('/space/locations/${widget.loc['id']}');
+  Future<void> _manageLocation() async {
+    final id = widget.loc['id']?.toString() ?? '';
+    final name = widget.loc['name']?.toString() ?? '';
+    final count = await widget.itemCount(locationId: id);
+    if (!mounted) return;
+    await showRenameDeleteSheet(
+      context,
+      typeLabel: '地点',
+      currentName: name,
+      itemCount: count,
+      onRename: (newName) async {
+        await widget.api.put('/space/locations/$id', body: {'name': newName});
         widget.onRefresh();
-      } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
-      }
-    }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已重命名为: $newName')));
+        }
+      },
+      onDelete: () async {
+        await widget.api.delete('/space/locations/$id');
+        widget.onRefresh();
+        if (mounted) {
+          context.read<AppState>().refreshSearchItems();
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('地点已删除')));
+        }
+      },
+    );
   }
 
   Future<void> _addZone() async {
@@ -345,22 +376,17 @@ class _LocationTileState extends State<_LocationTile> {
       child: ExpansionTile(
         initiallyExpanded: widget.initiallyExpanded,
         leading: const Icon(Icons.location_city, color: Colors.blue),
-        title: Text(widget.loc['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(
-          widget.loc['family_name'] != null
-              ? '家庭：${widget.loc['family_name']} · ${widget.loc['zone_count'] ?? 0} 个分区'
-              : '${widget.loc['zone_count'] ?? 0} 个分区',
+        title: _LongPressTitle(
+          title: widget.loc['name'] ?? '',
+          subtitle: widget.loc['family_name'] != null
+              ? '地点 · 家庭：${widget.loc['family_name']} · ${widget.loc['zone_count'] ?? 0} 个分区'
+              : '地点 · ${widget.loc['zone_count'] ?? 0} 个分区',
+          onLongPress: _manageLocation,
         ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.dashboard_customize, size: 20),
-              tooltip: '应用模板',
-              onPressed: widget.onApplyTemplate,
-            ),
-            IconButton(icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20), onPressed: _deleteLocation),
-          ],
+        trailing: IconButton(
+          icon: const Icon(Icons.dashboard_customize, size: 20),
+          tooltip: '应用模板',
+          onPressed: widget.onApplyTemplate,
         ),
         onExpansionChanged: (exp) { if (exp) _loadZones(); },
         children: [
@@ -369,6 +395,7 @@ class _LocationTileState extends State<_LocationTile> {
               _ZoneTile(
                 zone: z,
                 api: widget.api,
+                itemCount: widget.itemCount,
                 initiallyExpanded: z['id'] == widget.navZoneId,
                 navContainerId: widget.navContainerId,
                 highlightSlotId: widget.highlightSlotId,
@@ -389,6 +416,7 @@ class _LocationTileState extends State<_LocationTile> {
 class _ZoneTile extends StatefulWidget {
   final dynamic zone;
   final ApiClient api;
+  final Future<int> Function({String? locationId, String? zoneId, String? containerId, String? slotId}) itemCount;
   final bool initiallyExpanded;
   final String? navContainerId;
   final String? highlightSlotId;
@@ -398,6 +426,7 @@ class _ZoneTile extends StatefulWidget {
   const _ZoneTile({
     required this.zone,
     required this.api,
+    required this.itemCount,
     this.initiallyExpanded = false,
     this.navContainerId,
     this.highlightSlotId,
@@ -430,6 +459,31 @@ class _ZoneTileState extends State<_ZoneTile> {
     }
   }
 
+  Future<void> _manageZone() async {
+    final id = widget.zone['id']?.toString() ?? '';
+    final name = widget.zone['name']?.toString() ?? '';
+    final count = await widget.itemCount(zoneId: id);
+    if (!mounted) return;
+    await showRenameDeleteSheet(
+      context,
+      typeLabel: '分区',
+      currentName: name,
+      itemCount: count,
+      onRename: (newName) async {
+        await widget.api.put('/space/zones/$id', body: {'name': newName});
+        widget.onChanged();
+      },
+      onDelete: () async {
+        await widget.api.delete('/space/zones/$id');
+        widget.onChanged();
+        if (mounted) {
+          context.read<AppState>().refreshSearchItems();
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('分区已删除')));
+        }
+      },
+    );
+  }
+
   Future<void> _addContainer() async {
     final ctrl = TextEditingController();
     final slotCtrl = TextEditingController();
@@ -460,32 +514,6 @@ class _ZoneTileState extends State<_ZoneTile> {
     }
   }
 
-  Future<void> _addSlot(String containerId) async {
-    final ctrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('添加层级/抽屉'),
-        content: TextField(controller: ctrl, autofocus: true, decoration: const InputDecoration(hintText: '如：第二层抽屉')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('添加')),
-        ],
-      ),
-    );
-    if (ok == true && ctrl.text.isNotEmpty) {
-      try {
-        await widget.api.post('/space/containers/$containerId/slots', body: [
-          {'name': ctrl.text, 'level': 1},
-        ]);
-        setState(() => _containers = null);
-        _loadContainers();
-      } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final highlighted = widget.zone['id'] == widget.highlightZoneId;
@@ -499,7 +527,11 @@ class _ZoneTileState extends State<_ZoneTile> {
         child: ExpansionTile(
           initiallyExpanded: widget.initiallyExpanded || highlighted,
           leading: const Icon(Icons.crop_square, size: 20),
-          title: Text(widget.zone['name'] ?? ''),
+          title: _LongPressTitle(
+            title: widget.zone['name'] ?? '',
+            subtitle: '分区',
+            onLongPress: _manageZone,
+          ),
           onExpansionChanged: (exp) { if (exp) _loadContainers(); },
           trailing: IconButton(icon: const Icon(Icons.add, size: 18), onPressed: _addContainer),
           children: [
@@ -508,32 +540,17 @@ class _ZoneTileState extends State<_ZoneTile> {
                 const Padding(padding: EdgeInsets.all(12), child: Text('暂无储物模块', style: TextStyle(color: Colors.grey, fontSize: 13)))
               else
                 for (final c in _containers!)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-                    child: Card(
-                      child: ExpansionTile(
-                        initiallyExpanded: c['id'] == widget.navContainerId,
-                        leading: const Icon(Icons.cabin, size: 18),
-                        title: Text(c['name'] ?? '', style: const TextStyle(fontSize: 14)),
-                        subtitle: Text('${(c['slots'] as List?)?.length ?? 0} 个层级', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                        children: [
-                          if (c['slots'] != null)
-                            for (final s in c['slots'] as List)
-                              _SlotItemsTile(
-                                slot: s,
-                                api: widget.api,
-                                highlighted: s['id'] == widget.highlightSlotId,
-                                onChanged: widget.onChanged,
-                              ),
-                          ListTile(
-                            dense: true,
-                            leading: const Icon(Icons.add, color: Colors.green, size: 16),
-                            title: const Text('添加层级', style: TextStyle(fontSize: 13)),
-                            onTap: () => _addSlot(c['id']),
-                          ),
-                        ],
-                      ),
-                    ),
+                  _ContainerTile(
+                    container: c,
+                    api: widget.api,
+                    itemCount: widget.itemCount,
+                    initiallyExpanded: c['id'] == widget.navContainerId,
+                    highlightSlotId: widget.highlightSlotId,
+                    onChanged: () {
+                      setState(() => _containers = null);
+                      _loadContainers();
+                      widget.onChanged();
+                    },
                   ),
             ],
             ListTile(
@@ -549,16 +566,127 @@ class _ZoneTileState extends State<_ZoneTile> {
   }
 }
 
+// ---- Container Tile ----
+class _ContainerTile extends StatefulWidget {
+  final dynamic container;
+  final ApiClient api;
+  final Future<int> Function({String? locationId, String? zoneId, String? containerId, String? slotId}) itemCount;
+  final bool initiallyExpanded;
+  final String? highlightSlotId;
+  final VoidCallback onChanged;
+
+  const _ContainerTile({
+    required this.container,
+    required this.api,
+    required this.itemCount,
+    required this.onChanged,
+    this.initiallyExpanded = false,
+    this.highlightSlotId,
+  });
+
+  @override
+  State<_ContainerTile> createState() => _ContainerTileState();
+}
+
+class _ContainerTileState extends State<_ContainerTile> {
+  Future<void> _manageContainer() async {
+    final id = widget.container['id']?.toString() ?? '';
+    final name = widget.container['name']?.toString() ?? '';
+    final count = await widget.itemCount(containerId: id);
+    if (!mounted) return;
+    await showRenameDeleteSheet(
+      context,
+      typeLabel: '储物模块',
+      currentName: name,
+      itemCount: count,
+      onRename: (newName) async {
+        await widget.api.put('/space/containers/$id', body: {'name': newName});
+        widget.onChanged();
+      },
+      onDelete: () async {
+        await widget.api.delete('/space/containers/$id');
+        widget.onChanged();
+        if (mounted) {
+          context.read<AppState>().refreshSearchItems();
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('储物模块已删除')));
+        }
+      },
+    );
+  }
+
+  Future<void> _addSlot() async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('添加层级/抽屉'),
+        content: TextField(controller: ctrl, autofocus: true, decoration: const InputDecoration(hintText: '如：第二层抽屉')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('添加')),
+        ],
+      ),
+    );
+    if (ok == true && ctrl.text.isNotEmpty) {
+      try {
+        await widget.api.post('/space/containers/${widget.container['id']}/slots', body: [
+          {'name': ctrl.text, 'level': 1},
+        ]);
+        widget.onChanged();
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final slots = (widget.container['slots'] as List?) ?? [];
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      child: Card(
+        child: ExpansionTile(
+          initiallyExpanded: widget.initiallyExpanded,
+          leading: const Icon(Icons.cabin, size: 18),
+          title: _LongPressTitle(
+            title: widget.container['name'] ?? '',
+            subtitle: '储物模块 · ${slots.length} 个层级',
+            onLongPress: _manageContainer,
+          ),
+          children: [
+            for (final s in slots)
+              _SlotItemsTile(
+                slot: s,
+                api: widget.api,
+                itemCount: widget.itemCount,
+                highlighted: s['id'] == widget.highlightSlotId,
+                onChanged: widget.onChanged,
+              ),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.add, color: Colors.green, size: 16),
+              title: const Text('添加层级', style: TextStyle(fontSize: 13)),
+              onTap: _addSlot,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ---- Slot with items list ----
 class _SlotItemsTile extends StatefulWidget {
   final dynamic slot;
   final ApiClient api;
+  final Future<int> Function({String? locationId, String? zoneId, String? containerId, String? slotId}) itemCount;
   final VoidCallback onChanged;
   final bool highlighted;
 
   const _SlotItemsTile({
     required this.slot,
     required this.api,
+    required this.itemCount,
     required this.onChanged,
     this.highlighted = false,
   });
@@ -581,6 +709,31 @@ class _SlotItemsTileState extends State<_SlotItemsTile> {
       setState(() => _items = []);
     }
     setState(() => _loading = false);
+  }
+
+  Future<void> _manageSlot() async {
+    final id = widget.slot['id']?.toString() ?? '';
+    final name = widget.slot['name']?.toString() ?? '';
+    final count = await widget.itemCount(slotId: id);
+    if (!mounted) return;
+    await showRenameDeleteSheet(
+      context,
+      typeLabel: '层级',
+      currentName: name,
+      itemCount: count,
+      onRename: (newName) async {
+        await widget.api.put('/space/slots/$id', body: {'name': newName});
+        widget.onChanged();
+      },
+      onDelete: () async {
+        await widget.api.delete('/space/slots/$id');
+        widget.onChanged();
+        if (mounted) {
+          context.read<AppState>().refreshSearchItems();
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('层级已删除')));
+        }
+      },
+    );
   }
 
   Future<void> _markReturned(String itemId, String label) async {
@@ -898,14 +1051,15 @@ class _SlotItemsTileState extends State<_SlotItemsTile> {
         child: ExpansionTile(
           dense: true,
           leading: const Icon(Icons.grid_view, size: 16),
-          title: Text(widget.slot['name'] ?? '', style: const TextStyle(fontSize: 13)),
-          subtitle: Text(
-            _loading
-                ? '加载中...'
+          title: _LongPressTitle(
+            title: widget.slot['name'] ?? '',
+            subtitle: _loading
+                ? '层级 · 加载中...'
                 : itemCount != null
                     ? '层级 ${widget.slot['level'] ?? 0} · $itemCount 件物品'
                     : '层级 ${widget.slot['level'] ?? 0}',
-            style: const TextStyle(fontSize: 11),
+            onLongPress: _manageSlot,
+            compact: true,
           ),
           onExpansionChanged: (exp) {
             if (exp) _loadItems();
@@ -950,6 +1104,44 @@ class _SlotItemsTileState extends State<_SlotItemsTile> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _LongPressTitle extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final VoidCallback onLongPress;
+  final bool compact;
+
+  const _LongPressTitle({
+    required this.title,
+    required this.subtitle,
+    required this.onLongPress,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onLongPress: onLongPress,
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              fontWeight: compact ? FontWeight.normal : FontWeight.bold,
+              fontSize: compact ? 13 : null,
+            ),
+          ),
+          Text(
+            subtitle,
+            style: TextStyle(fontSize: compact ? 11 : 12, color: Colors.grey.shade600),
+          ),
+        ],
       ),
     );
   }

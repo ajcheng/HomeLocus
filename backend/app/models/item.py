@@ -13,7 +13,7 @@ class Item(Base):
     __tablename__ = "items"
 
     id: Mapped[str] = mapped_column(String(50), primary_key=True, default=lambda: f"item_{uuid.uuid4().hex[:8]}")
-    slot_id: Mapped[str] = mapped_column(String(50), ForeignKey("slots.id"), nullable=False)
+    slot_id: Mapped[Optional[str]] = mapped_column(String(50), ForeignKey("slots.id"), nullable=True)
     label: Mapped[str] = mapped_column(String(200), nullable=False)
     brand: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)

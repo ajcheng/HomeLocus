@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.space import Slot, Container, Zone, Location
 from app.models.item import Item
 from app.services.search_engine import search_engine
+from app.utils.search_synonyms import expand_search_terms, search_tags_for_item
 
 
 class SearchService:
@@ -38,14 +39,21 @@ class SearchService:
                 text, location_id, category, tag, limit, include_history=False
             )
 
+        search_text = text
+        if text:
+            expanded = expand_search_terms(text)
+            if len(expanded) > 1:
+                search_text = " ".join(expanded)
+
         hits = search_engine.hybrid_search(
-            text=text, vector=vector, location_id=location_id, category=category, limit=limit
+            text=search_text, vector=vector, location_id=location_id, category=category, limit=limit
         )
 
-        if text and len(hits) < limit:
-            db_hits = await self._search_db(
-                text, location_id, category, None, limit, include_history=False
-            )
+        db_hits = await self._search_db(
+            text, location_id, category, None, limit, include_history=False
+        ) if text else []
+
+        if text:
             seen = {h["id"] for h in hits}
             for h in db_hits:
                 if h["id"] not in seen:
@@ -55,7 +63,7 @@ class SearchService:
 
         if not hits:
             if text:
-                return []
+                return db_hits[:limit]
             return await self._search_db(
                 None, location_id, category, None, limit, include_history=False
             )
@@ -132,15 +140,29 @@ class SearchService:
         if not item.is_confirmed or item.is_deleted:
             return
         location_id = await self._location_id_for_slot(item.slot_id)
-        tags = item.tags if isinstance(item.tags, list) else []
+        tags = search_tags_for_item(
+            item.label,
+            item.brand,
+            item.category,
+            item.tags if isinstance(item.tags, list) else [],
+        )
+        ocr_parts = [
+            item.raw_recognition or "",
+            item.ai_label_raw or "",
+            item.color or "",
+            item.purpose or "",
+        ]
         search_engine.index_text(
             item.id,
             item.label,
             item.brand,
             tags,
-            "",
+            " ".join(p for p in ocr_parts if p),
             location_id,
             item.category,
+            color=item.color,
+            purpose=item.purpose,
+            raw_recognition=item.raw_recognition,
         )
 
     async def reindex_all_items(self) -> int:
@@ -202,20 +224,28 @@ class SearchService:
         tag: str | None,
         include_history: bool,
     ):
-        stmt = (
-            select(Item, Slot, Container, Zone, Location)
-            .join(Slot, Item.slot_id == Slot.id)
-            .join(Container, Slot.container_id == Container.id)
-            .join(Zone, Container.zone_id == Zone.id)
-            .join(Location, Zone.location_id == Location.id)
-            .where(Item.is_confirmed == True)
-        )
         if include_history:
-            stmt = stmt.where(Item.is_deleted == True)
+            stmt = (
+                select(Item, Slot, Container, Zone, Location)
+                .outerjoin(Slot, Item.slot_id == Slot.id)
+                .outerjoin(Container, Slot.container_id == Container.id)
+                .outerjoin(Zone, Container.zone_id == Zone.id)
+                .outerjoin(Location, Zone.location_id == Location.id)
+                .where(Item.is_confirmed == True, Item.is_deleted == True)
+            )
+            if location_id:
+                stmt = stmt.where(or_(Location.id == location_id, Item.slot_id.is_(None)))
         else:
-            stmt = stmt.where(Item.is_deleted == False)
-        if location_id:
-            stmt = stmt.where(Location.id == location_id)
+            stmt = (
+                select(Item, Slot, Container, Zone, Location)
+                .join(Slot, Item.slot_id == Slot.id)
+                .join(Container, Slot.container_id == Container.id)
+                .join(Zone, Container.zone_id == Zone.id)
+                .join(Location, Zone.location_id == Location.id)
+                .where(Item.is_confirmed == True, Item.is_deleted == False)
+            )
+            if location_id:
+                stmt = stmt.where(Location.id == location_id)
         if category:
             stmt = stmt.where(Item.category == category)
         if tag:
@@ -233,12 +263,24 @@ class SearchService:
     ) -> list[dict]:
         stmt = self._base_item_stmt(location_id, category, tag, include_history)
         if text:
-            terms = [t.strip() for t in text.replace("，", ",").replace("、", ",").split(",") if t.strip()]
-            if not terms:
-                terms = [text.strip()]
+            raw_terms = [
+                t.strip()
+                for t in text.replace("，", " ").replace("、", " ").replace(",", " ").split()
+                if t.strip()
+            ]
+            if not raw_terms:
+                raw_terms = [text.strip()]
+            terms: list[str] = []
+            seen_terms: set[str] = set()
+            for t in raw_terms:
+                for expanded in expand_search_terms(t):
+                    if expanded not in seen_terms:
+                        seen_terms.add(expanded)
+                        terms.append(expanded)
+            term_conditions = []
             for term in terms:
                 pattern = f"%{term}%"
-                stmt = stmt.where(
+                term_conditions.append(
                     or_(
                         Item.label.ilike(pattern),
                         Item.brand.ilike(pattern),
@@ -250,6 +292,8 @@ class SearchService:
                         Item.tags.cast(String).ilike(pattern),
                     )
                 )
+            if term_conditions:
+                stmt = stmt.where(or_(*term_conditions))
         order_col = Item.deleted_at.desc() if include_history else Item.updated_at.desc()
         stmt = stmt.order_by(order_col).limit(limit)
         result = await self.db.execute(stmt)
@@ -260,8 +304,12 @@ class SearchService:
                 "label": item.label,
                 "item_label": item.label,
                 "score": 0.9,
-                "slot_id": slot.id,
-                "breadcrumb": f"{loc.name} / {zone.name} / {container.name} / {slot.name}",
+                "slot_id": slot.id if slot else "",
+                "breadcrumb": (
+                    f"{loc.name} / {zone.name} / {container.name} / {slot.name}"
+                    if slot and container and zone and loc
+                    else "位置已删除"
+                ),
                 "thumbnail_url": item.thumbnail_path or "",
                 "last_updated": item.updated_at.isoformat() if item.updated_at else None,
                 "tags": item.tags if isinstance(item.tags, list) else [],

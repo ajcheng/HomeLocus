@@ -82,6 +82,15 @@ async def get_task_status(task_id: str, svc: ItemService = Depends(get_item_serv
     return schemas.TaskStatusResponse(task_id=task_id, status="processing")
 
 
+@router.post("/lookup")
+async def lookup_items(
+    data: schemas.ItemLookupRequest,
+    svc: ItemService = Depends(get_item_service),
+):
+    """批量查询物品摘要（本机图库关联）。"""
+    return await svc.lookup_items(data.ids[:200])
+
+
 @router.get("/gallery", response_model=list[schemas.GalleryItemResponse])
 async def list_gallery(
     location_id: str | None = None,

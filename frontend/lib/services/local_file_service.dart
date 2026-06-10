@@ -5,6 +5,13 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
+class LocalImageFile {
+  final String path;
+  final DateTime modified;
+
+  const LocalImageFile({required this.path, required this.modified});
+}
+
 class LocalFileService {
   final _uuid = const Uuid();
 
@@ -33,6 +40,22 @@ class LocalFileService {
   Future<String> imagesRootPath() async {
     final base = await getApplicationDocumentsDirectory();
     return p.join(base.path, 'images');
+  }
+
+  static const _imageExts = {'.jpg', '.jpeg', '.png', '.webp', '.heic'};
+
+  /// 扫描本机 images/ 目录下所有原始照片
+  Future<List<LocalImageFile>> listAllImages() async {
+    final root = Directory(await imagesRootPath());
+    if (!await root.exists()) return [];
+    final result = <LocalImageFile>[];
+    await for (final entity in root.list(recursive: true, followLinks: false)) {
+      if (entity is! File) continue;
+      final ext = p.extension(entity.path).toLowerCase();
+      if (!_imageExts.contains(ext)) continue;
+      result.add(LocalImageFile(path: entity.path, modified: await entity.lastModified()));
+    }
+    return result;
   }
 
   Future<Directory> _imagesDir() async {

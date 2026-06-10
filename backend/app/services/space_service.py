@@ -1,4 +1,6 @@
-from sqlalchemy import select, func, delete, or_
+from datetime import datetime, timezone
+
+from sqlalchemy import select, func, delete, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -60,6 +62,81 @@ class SpaceService:
     async def get_location(self, location_id: str) -> Location | None:
         return await self.db.get(Location, location_id)
 
+    async def update_location(self, location_id: str, name: str) -> Location | None:
+        loc = await self.db.get(Location, location_id)
+        if not loc:
+            return None
+        loc.name = name.strip()
+        await self.db.commit()
+        await self.db.refresh(loc)
+        return loc
+
+    async def count_items_in_slots(self, slot_ids: list[str]) -> int:
+        if not slot_ids:
+            return 0
+        result = await self.db.execute(
+            select(func.count(Item.id)).where(
+                Item.slot_id.in_(slot_ids),
+                Item.is_deleted == False,
+            )
+        )
+        return int(result.scalar_one() or 0)
+
+    async def _slot_ids_for_location(self, location_id: str) -> list[str]:
+        result = await self.db.execute(
+            select(Slot.id)
+            .join(Container, Slot.container_id == Container.id)
+            .join(Zone, Container.zone_id == Zone.id)
+            .where(Zone.location_id == location_id)
+        )
+        return [r[0] for r in result.all()]
+
+    async def _slot_ids_for_zone(self, zone_id: str) -> list[str]:
+        result = await self.db.execute(
+            select(Slot.id)
+            .join(Container, Slot.container_id == Container.id)
+            .where(Container.zone_id == zone_id)
+        )
+        return [r[0] for r in result.all()]
+
+    async def _slot_ids_for_container(self, container_id: str) -> list[str]:
+        result = await self.db.execute(
+            select(Slot.id).where(Slot.container_id == container_id)
+        )
+        return [r[0] for r in result.all()]
+
+    async def count_items_for_location(self, location_id: str) -> int:
+        return await self.count_items_in_slots(await self._slot_ids_for_location(location_id))
+
+    async def count_items_for_zone(self, zone_id: str) -> int:
+        return await self.count_items_in_slots(await self._slot_ids_for_zone(zone_id))
+
+    async def count_items_for_container(self, container_id: str) -> int:
+        return await self.count_items_in_slots(await self._slot_ids_for_container(container_id))
+
+    async def count_items_for_slot(self, slot_id: str) -> int:
+        return await self.count_items_in_slots([slot_id])
+
+    async def _archive_items_in_slots(self, slot_ids: list[str]) -> int:
+        if not slot_ids:
+            return 0
+        now = datetime.now(timezone.utc)
+        result = await self.db.execute(
+            update(Item)
+            .where(Item.slot_id.in_(slot_ids), Item.is_deleted == False)
+            .values(is_deleted=True, deleted_at=now, slot_id=None)
+        )
+        return result.rowcount or 0
+
+    async def _cleanup_slots(self, slot_ids: list[str]) -> None:
+        if not slot_ids:
+            return
+        item_rows = await self.db.execute(select(Item.id).where(Item.slot_id.in_(slot_ids)))
+        item_ids = [r[0] for r in item_rows.all()]
+        if item_ids:
+            await self.db.execute(delete(Reminder).where(Reminder.item_id.in_(item_ids)))
+        await self.db.execute(delete(ImageSnapshot).where(ImageSnapshot.slot_id.in_(slot_ids)))
+
     async def delete_location(self, location_id: str) -> bool:
         """删除地点及下属分区/物品；先清理平面图与快照等外键依赖。"""
         result = await self.db.execute(
@@ -80,14 +157,8 @@ class SpaceService:
             for container in zone.containers:
                 slot_ids.extend(s.id for s in container.slots)
 
-        if slot_ids:
-            item_rows = await self.db.execute(
-                select(Item.id).where(Item.slot_id.in_(slot_ids))
-            )
-            item_ids = [r[0] for r in item_rows.all()]
-            if item_ids:
-                await self.db.execute(delete(Reminder).where(Reminder.item_id.in_(item_ids)))
-            await self.db.execute(delete(ImageSnapshot).where(ImageSnapshot.slot_id.in_(slot_ids)))
+        await self._archive_items_in_slots(slot_ids)
+        await self._cleanup_slots(slot_ids)
 
         fp_rows = await self.db.execute(
             select(FloorPlan).where(FloorPlan.location_id == location_id)
@@ -113,6 +184,36 @@ class SpaceService:
             stmt = stmt.where(Zone.location_id == location_id)
         result = await self.db.execute(stmt.options(selectinload(Zone.containers)))
         return list(result.scalars().all())
+
+    async def get_zone(self, zone_id: str) -> Zone | None:
+        return await self.db.get(Zone, zone_id)
+
+    async def update_zone(self, zone_id: str, name: str) -> Zone | None:
+        zone = await self.db.get(Zone, zone_id)
+        if not zone:
+            return None
+        zone.name = name.strip()
+        await self.db.commit()
+        await self.db.refresh(zone)
+        return zone
+
+    async def delete_zone(self, zone_id: str) -> bool:
+        result = await self.db.execute(
+            select(Zone)
+            .where(Zone.id == zone_id)
+            .options(
+                selectinload(Zone.containers).selectinload(Container.slots)
+            )
+        )
+        zone = result.scalar_one_or_none()
+        if not zone:
+            return False
+        slot_ids = [s.id for c in zone.containers for s in c.slots]
+        await self._archive_items_in_slots(slot_ids)
+        await self._cleanup_slots(slot_ids)
+        await self.db.delete(zone)
+        await self.db.commit()
+        return True
 
     # ---- Container ----
     async def create_container(self, data: schemas.ContainerCreate) -> Container:
@@ -147,6 +248,31 @@ class SpaceService:
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def update_container(self, container_id: str, name: str) -> Container | None:
+        container = await self.db.get(Container, container_id)
+        if not container:
+            return None
+        container.name = name.strip()
+        await self.db.commit()
+        await self.db.refresh(container)
+        return container
+
+    async def delete_container(self, container_id: str) -> bool:
+        result = await self.db.execute(
+            select(Container)
+            .where(Container.id == container_id)
+            .options(selectinload(Container.slots))
+        )
+        container = result.scalar_one_or_none()
+        if not container:
+            return False
+        slot_ids = [s.id for s in container.slots]
+        await self._archive_items_in_slots(slot_ids)
+        await self._cleanup_slots(slot_ids)
+        await self.db.delete(container)
+        await self.db.commit()
+        return True
+
     # ---- Slot ----
     async def create_slots(self, container_id: str, slots: list[schemas.SlotCreate]) -> list[Slot]:
         created = []
@@ -177,6 +303,8 @@ class SpaceService:
         slot = await self.db.get(Slot, slot_id)
         if not slot:
             return False
+        await self._archive_items_in_slots([slot_id])
+        await self._cleanup_slots([slot_id])
         await self.db.delete(slot)
         await self.db.commit()
         return True

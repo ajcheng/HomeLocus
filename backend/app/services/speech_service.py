@@ -14,6 +14,7 @@ from app.schemas.speech import ParsedItem, MatchedSlot
 from app.utils.voice_parser import parse_voice_text
 from app.schemas import reminder as reminder_schemas
 from app.services.search_service import SearchService
+from app.utils.search_synonyms import search_tags_for_item
 from app.services.reminder_service import ReminderService
 
 logger = logging.getLogger(__name__)
@@ -288,7 +289,12 @@ class SpeechService:
             category=parsed.category,
             color=parsed.color,
             purpose=getattr(parsed, "purpose", None),
-            tags=parsed.tags,
+            tags=search_tags_for_item(
+                parsed.label,
+                parsed.brand,
+                parsed.category,
+                parsed.tags,
+            ),
             raw_recognition=parsed.raw_recognition or transcription or parsed.label,
             is_chargeable=parsed.is_chargeable,
         )

@@ -14,10 +14,8 @@ IMAGE_TAR="$IMAGES_DIR/homelocus-backend.tar"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-echo "=== 1. 构建镜像（若尚未构建）==="
-if ! sudo docker image inspect homelocus-backend:latest &>/dev/null; then
-  sudo docker build -t homelocus-backend:latest "$PROJECT_DIR/backend"
-fi
+echo "=== 1. 构建 backend 镜像 ==="
+sudo docker build -t homelocus-backend:latest "$PROJECT_DIR/backend"
 
 echo "=== 2. 导出 backend 镜像 ==="
 mkdir -p "$IMAGES_DIR"

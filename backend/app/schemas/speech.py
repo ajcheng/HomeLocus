@@ -28,6 +28,8 @@ class SaveVoiceItemRequest(BaseModel):
     slot_id: str
     text: str
     label: Optional[str] = None
+    brand: Optional[str] = None
+    category: Optional[str] = None
     color: Optional[str] = None
     tags: list[str] = []
 
