@@ -16,28 +16,46 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
 celery -A app.tasks.celery_app beat --loglevel=info
 
+# Frontend (联网版) — dev
+cd frontend && flutter run -d chrome
+# Frontend (联网版) — production build with real domain
+bash build_local.sh web   # uses --dart-define to inject domain
+bash build_local.sh apk   # Android APK
+
+# app_local (纯本地版)
+cd app_local && bash build_local.sh   # also uses --dart-define
+
 # Full Docker deploy
 docker compose -f docker/docker-compose.yml up -d
 docker compose -f docker/docker-compose.yml exec backend alembic upgrade head
-
-# Frontend
-cd frontend && flutter build web
-cd frontend && flutter build apk --release --target-platform android-arm64
 ```
 
 ## Architecture
 
-**Backend:** FastAPI (Python 3.12) — 13 route modules under `app/api/v1/`, each with matching `service_*.py` and `schema_*.py` in `app/services/` and `app/schemas/`. The API router prefixes everything with `/api/v1`. Auth is JWT (HS256, 7d expiry) via `app/core/security.py:get_current_user` — all business endpoints require it except `/auth/register` and `/auth/login`.
+### 两个 Flutter 项目
+| 项目 | 目录 | 数据后端 | 登录 | 识别方式 |
+|------|------|---------|------|---------|
+| 联网版 | `frontend/` | PostgreSQL (服务端) | JWT | Celery + AI API |
+| 本地版 | `app_local/` | SQLite (手机本地) | 无 | 直连网关 + 大模型 |
 
-**Four-level spatial topology:** `Location → Zone → Container → Slot`. Location optionally links to `Family` (multi-member sharing). Items live in Slots. Seeds create a default "Demo" location.
+**Backend:** FastAPI (Python 3.12) — 13 route modules under `app/api/v1/`, each with matching `service_*.py` and `schema_*.py`. The API router prefixes everything with `/api/v1`. Auth is JWT (HS256, 7d expiry) via `app/core/security.py:get_current_user` — `/auth/register` and `/auth/login` are public; all other endpoints require auth via `require_auth` dependency.
 
-**Config:** `BaseSettings` in `app/core/config.py`, loaded from `.env`. Key env vars: `STORAGE_BACKEND` (local/minio/s3), `AI_PROVIDER` (deepseek/openai/custom), `AI_API_KEY`, `AI_VISION_MODEL`, `JWT_SECRET`. Docker compose env vars use `${VAR:-default}` syntax.
+**Four-level spatial topology:** `Location → Zone → Container → Slot`. Location optionally links to `Family` (multi-member sharing). Items live in Slots.
 
-**Frontend:** Flutter with 13 screens under `frontend/lib/screens/`. `ApiClient` is a singleton-pattern HTTP client — set `ApiClient.authToken` (static field) after login, all subsequent requests auto-attach `Authorization: Bearer`. Token is persisted in SharedPreferences. `baseUrl` defaults to `http://localhost:8000/api/v1`（生产域名通过 `--dart-define` 注入）.
+**Recognition providers (configurable):** `qwen` (千问租户 API), `yolo` (本地 YOLO11), `vision` (OpenAI-compatible Vision), `auto` (fallback chain).
 
-**Docker services:** postgres:16-alpine, redis:7-alpine, meilisearch:v1.13, qdrant/qdrant:latest, plus 3 custom images (backend, celery-worker, celery-beat). Production compose (`docker-compose.prod.yml`) keeps all ports internal — only backend binds 127.0.0.1:8000 for nginx reverse proxy.
+**Hybrid search:** Meilisearch (text) + Qdrant (vector) + RRF fusion + search synonyms (`backend/app/utils/search_synonyms.py` — bidirectional expansion, e.g. "保暖穿的" ↔ "羽绒服").
 
-**Celery tasks:** `process_upload` (recognition.py) — image storage → compression → OCR → Vision API → thumbnails. `check_pending_reminders` (scheduler.py) — runs every 10 min, scans for due reminders.
+**Three lightweight gateway services** under `services/`:
+- `media-gateway` (Flask) — image upload → public URL for vision model
+- `asr-gateway` (FastAPI) — audio → text via Qwen3-ASR
+- `yolo-vision` (Flask) — OpenVINO + YOLO11 local detection
+
+**Celery tasks:** `process_upload` (recognition.py) — image storage → compression → OCR → Vision API → thumbnails. `check_pending_reminders` (scheduler.py) — every 10 min, scans for due reminders.
+
+**Config:** `BaseSettings` in `app/core/config.py`, loaded from `.env`. Docker compose uses `${VAR:-default}` syntax.
+
+**Domain injection:** Production domain (`ajcheng.com`) is never in source code. Flutter uses `--dart-define` via `build_local.sh` (gitignored). Backend uses `.env` (gitignored). Tracking-safe defaults are always `localhost` or `example.com`.
 
 ## Key Patterns
 
@@ -45,8 +63,9 @@ cd frontend && flutter build apk --release --target-platform android-arm64
 - **Async DB:** All routes use `AsyncSession` via `Depends(get_db)`. Services accept `db: AsyncSession` in `__init__`. Lazy-loading relationships must use `selectinload()`.
 - **Storage backend:** `StorageService` (strategy pattern) — `LocalStorage`, `S3Storage`. Set `STORAGE_BACKEND=local` for filesystem, `minio`/`s3` for object storage.
 - **AI Vision:** Uses Anthropic-compatible Messages API at `{AI_BASE_URL}/anthropic/v1/messages` with `x-api-key` header. Image is resized to max 1024px before base64 encoding.
-- **Search:** Meilisearch (text) + Qdrant (vector) with RRF fusion. Qdrant uses MD5→UUID for string IDs (Qdrant only accepts UUID/uint64).
+- **Qdrant ID mapping:** Uses MD5→UUID for string IDs (Qdrant only accepts UUID/uint64).
 - **Deployment:** SCP images through SSH jump host `sx` → target `nginx`. `deploy/deploy.sh` automates the full flow.
+- **Recognition pipeline:** Celery writes AI results to `ImageSnapshot` only — items await user confirmation before committing to DB.
 
 ## Database Models (13 tables)
 
@@ -78,3 +97,9 @@ alembic upgrade head
 In Docker: `docker compose exec backend alembic upgrade head`
 
 When deploying to production, set `DATABASE_URL_SYNC` to use the Docker service hostname (`postgres`, not `localhost`). The alembic `env.py` uses the synchronous URL from config.
+
+## Testing
+
+```bash
+cd backend && pytest     # tests/ directory
+```
