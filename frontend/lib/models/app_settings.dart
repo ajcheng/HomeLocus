@@ -11,7 +11,10 @@ class AppSettings {
   AppConfig recognition;
 
   AppSettings({
-    this.serverUrl = 'https://home.ajcheng.com:8443/api/v1',
+    this.serverUrl = const String.fromEnvironment(
+      'HOMELOCUS_SERVER_URL',
+      defaultValue: 'http://localhost:8000/api/v1',
+    ),
     this.aiProvider = 'custom',
     this.aiApiKey = '',
     this.visionModel = 'qwen-vl-plus',
@@ -31,7 +34,9 @@ class AppSettings {
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> j) => AppSettings(
-        serverUrl: j['serverUrl'] ?? 'https://home.ajcheng.com:8443/api/v1',
+        serverUrl: j['serverUrl'] ?? String.fromEnvironment(
+          'HOMELOCUS_SERVER_URL', defaultValue: 'http://localhost:8000/api/v1',
+        ),
         aiProvider: j['aiProvider'] ?? 'custom',
         aiApiKey: j['aiApiKey'] ?? '',
         visionModel: j['visionModel'] ?? 'qwen-vl-plus',

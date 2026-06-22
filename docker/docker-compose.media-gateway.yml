@@ -5,7 +5,7 @@ services:
     ports:
       - "127.0.0.1:8780:8780"
     environment:
-      PUBLIC_BASE_URL: https://home.ajcheng.com:8443/media
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8780}
       MEDIA_GATEWAY_API_KEY: ${MEDIA_GATEWAY_API_KEY:-}
       MAX_UPLOAD_MB: "20"
     volumes:

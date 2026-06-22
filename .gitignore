@@ -30,11 +30,16 @@ backend/storage/
 # Docker volumes
 docker/volumes/
 
+# Deploy local overrides
+deploy/*.local
+
 # Flutter
 frontend/build/
 frontend/.dart_tool/
 frontend/.packages
 frontend/.flutter-plugins*
+frontend/build_local.sh
+app_local/build_local.sh
 *.apk
 backend/static/
 

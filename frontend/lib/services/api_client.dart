@@ -3,7 +3,10 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 class ApiClient {
-  static String baseUrl = 'https://home.ajcheng.com:8443/api/v1';
+  static String baseUrl = const String.fromEnvironment(
+    'HOMELOCUS_SERVER_URL',
+    defaultValue: 'http://localhost:8000/api/v1',
+  );
   static String? authToken; // Set after login, used by all instances
 
   final String _baseUrl;

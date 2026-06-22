@@ -18,7 +18,10 @@ class AppConfig {
   String asrLanguage;
 
   AppConfig({
-    this.mediaGatewayUrl = 'https://home.ajcheng.com:8443/media',
+    this.mediaGatewayUrl = const String.fromEnvironment(
+      'HOMELOCUS_MEDIA_URL',
+      defaultValue: 'http://localhost:8780',
+    ),
     this.mediaGatewayApiKey = '',
     this.visionProvider = 'qwen_tenant',
     this.visionApiUrl = 'https://nfam-api.yst.com.cn/tenant/trans/call',
@@ -27,7 +30,10 @@ class AppConfig {
     this.visionTenantId = '',
     this.visionPrompt =
         '简洁语言输出图片物品中文名称，品牌型号（如有），颜色，用途、分类信息。每个物品一行，格式：名称|品牌|颜色|分类|用途',
-    this.asrGatewayUrl = 'https://home.ajcheng.com:8443/asr',
+    this.asrGatewayUrl = const String.fromEnvironment(
+      'HOMELOCUS_ASR_URL',
+      defaultValue: 'http://localhost:8781',
+    ),
     this.asrGatewayApiKey = '',
     this.asrLanguage = 'zh',
   });
@@ -47,7 +53,9 @@ class AppConfig {
       };
 
   factory AppConfig.fromJson(Map<String, dynamic> j) => AppConfig(
-        mediaGatewayUrl: j['mediaGatewayUrl'] ?? 'https://home.ajcheng.com:8443/media',
+        mediaGatewayUrl: j['mediaGatewayUrl'] ?? String.fromEnvironment(
+          'HOMELOCUS_MEDIA_URL', defaultValue: 'http://localhost:8780',
+        ),
         mediaGatewayApiKey: j['mediaGatewayApiKey'] ?? '',
         visionProvider: j['visionProvider'] ?? 'qwen_tenant',
         visionApiUrl: j['visionApiUrl'] ?? 'https://nfam-api.yst.com.cn/tenant/trans/call',
@@ -56,7 +64,9 @@ class AppConfig {
         visionTenantId: j['visionTenantId'] ?? '',
         visionPrompt: j['visionPrompt'] ??
             '简洁语言输出图片物品中文名称，品牌型号（如有），颜色，用途、分类信息',
-        asrGatewayUrl: j['asrGatewayUrl'] ?? 'https://home.ajcheng.com:8443/asr',
+        asrGatewayUrl: j['asrGatewayUrl'] ?? String.fromEnvironment(
+          'HOMELOCUS_ASR_URL', defaultValue: 'http://localhost:8781',
+        ),
         asrGatewayApiKey: j['asrGatewayApiKey'] ?? '',
         asrLanguage: j['asrLanguage'] ?? 'zh',
       );

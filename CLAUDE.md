@@ -33,7 +33,7 @@ cd frontend && flutter build apk --release --target-platform android-arm64
 
 **Config:** `BaseSettings` in `app/core/config.py`, loaded from `.env`. Key env vars: `STORAGE_BACKEND` (local/minio/s3), `AI_PROVIDER` (deepseek/openai/custom), `AI_API_KEY`, `AI_VISION_MODEL`, `JWT_SECRET`. Docker compose env vars use `${VAR:-default}` syntax.
 
-**Frontend:** Flutter with 13 screens under `frontend/lib/screens/`. `ApiClient` is a singleton-pattern HTTP client — set `ApiClient.authToken` (static field) after login, all subsequent requests auto-attach `Authorization: Bearer`. Token is persisted in SharedPreferences. `baseUrl` defaults to `https://home.ajcheng.com:8443/api/v1`.
+**Frontend:** Flutter with 13 screens under `frontend/lib/screens/`. `ApiClient` is a singleton-pattern HTTP client — set `ApiClient.authToken` (static field) after login, all subsequent requests auto-attach `Authorization: Bearer`. Token is persisted in SharedPreferences. `baseUrl` defaults to `http://localhost:8000/api/v1`（生产域名通过 `--dart-define` 注入）.
 
 **Docker services:** postgres:16-alpine, redis:7-alpine, meilisearch:v1.13, qdrant/qdrant:latest, plus 3 custom images (backend, celery-worker, celery-beat). Production compose (`docker-compose.prod.yml`) keeps all ports internal — only backend binds 127.0.0.1:8000 for nginx reverse proxy.
 

@@ -7,10 +7,10 @@
 将 App 上传的图片存到服务器，返回公网 URL 供千问 `imageFileUrls` 使用。
 
 ```bash
-curl -X POST "https://home.ajcheng.com:8443/media/upload" \
+curl -X POST "https://home.example.com:8443/media/upload" \
   -H "Authorization: Bearer <key>" \
   -F "file=@/path/to/photo.jpg"
-# → {"success":true,"url":"https://home.ajcheng.com:8443/media/files/2026/06/08/abc.jpg"}
+# → {"success":true,"url":"https://home.example.com:8443/media/files/2026/06/08/abc.jpg"}
 ```
 
 环境变量：
@@ -26,7 +26,7 @@ curl -X POST "https://home.ajcheng.com:8443/media/upload" \
 接收音频，调用 Qwen3-ASR 返回文本。
 
 ```bash
-curl -X POST "https://home.ajcheng.com:8443/asr/transcribe" \
+curl -X POST "https://home.example.com:8443/asr/transcribe" \
   -F "file=@audio.wav" -F "language=zh"
 ```
 

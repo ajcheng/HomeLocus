@@ -31,7 +31,14 @@ curl -sf http://127.0.0.1:8780/health && echo " media-gateway OK"
 REMOTE
 
 echo "=== 5. 更新 Nginx 配置 ==="
-scp "$PROJECT_DIR/deploy/nginx-home.conf" "$TARGET:/opt/openresty/nginx/conf/conf.d/home.conf"
+NGINX_SRC="$PROJECT_DIR/deploy/nginx-home.conf.local"
+if [ -f "$NGINX_SRC" ]; then
+  echo "  使用本地覆盖配置: nginx-home.conf.local"
+else
+  NGINX_SRC="$PROJECT_DIR/deploy/nginx-home.conf"
+  echo "  使用模板配置（部署后请检查 server_name 与 SSL 路径）"
+fi
+scp "$NGINX_SRC" "$TARGET:/opt/openresty/nginx/conf/conf.d/home.conf"
 ssh "$TARGET" "sudo nginx -t && sudo systemctl reload nginx"
 
 echo ""

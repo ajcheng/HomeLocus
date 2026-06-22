@@ -90,7 +90,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 16),
           _section('1. 图片上传网关', [
-            _field(_mediaUrl, '网关地址', 'https://home.ajcheng.com:8443/media'),
+            _field(_mediaUrl, '网关地址', 'http://localhost:8780'),
             _field(_mediaKey, 'API Key（可选）', '留空则不校验'),
           ]),
           _section('2. 图像识别（千问 VL）', [
@@ -111,7 +111,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _field(_visionPrompt, '识别提示词', null, maxLines: 3),
           ]),
           _section('3. 语音识别网关', [
-            _field(_asrUrl, 'ASR 网关地址', 'https://home.ajcheng.com:8443/asr'),
+            _field(_asrUrl, 'ASR 网关地址', 'http://localhost:8781'),
             _field(_asrKey, 'API Key（可选）', ''),
           ]),
           const SizedBox(height: 24),

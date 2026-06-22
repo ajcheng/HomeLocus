@@ -13,7 +13,7 @@ from werkzeug.utils import secure_filename
 app = Flask(__name__)
 
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/data/media-gateway/uploads"))
-PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "https://home.ajcheng.com:8443/media").rstrip("/")
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
 API_KEY = os.environ.get("MEDIA_GATEWAY_API_KEY", "")
 MAX_MB = int(os.environ.get("MAX_UPLOAD_MB", "20"))
 ALLOWED = {"jpg", "jpeg", "png", "webp", "gif"}

@@ -50,7 +50,12 @@ ssh "$TARGET" "cd $DEPLOY_DIR && sudo docker compose -f docker/docker-compose.ym
 
 echo ""
 echo "=== 8. Install nginx config ==="
-scp deploy/nginx-your-domain.com.conf "$TARGET:/etc/nginx/conf.d/home.conf"
+NGINX_SRC="$SCRIPT_DIR/nginx-home.conf.local"
+if [ -f "$NGINX_SRC" ]; then
+  scp "$NGINX_SRC" "$TARGET:/etc/nginx/conf.d/home.conf"
+else
+  echo "⚠ 未找到 nginx-home.conf.local，请手动配置 nginx"
+fi
 ssh "$TARGET" "sudo nginx -t && sudo systemctl reload nginx"
 
 echo ""
@@ -58,7 +63,7 @@ echo "=== 9. Verify ==="
 sleep 5
 ssh "$TARGET" "cd $DEPLOY_DIR && sudo docker compose -f docker/docker-compose.yml ps"
 echo ""
-curl -s http://your-domain.com/health || echo "Health check via domain failed, trying local..."
+curl -s http://localhost:8000/health || echo "Health check via localhost failed, trying..."
 ssh "$TARGET" "curl -s http://127.0.0.1:8000/health"
 
 echo ""

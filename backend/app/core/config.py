@@ -37,11 +37,11 @@ class Settings(BaseSettings):
     ai_vision_model: str = "deepseek-chat"  # Model with vision support
     asr_model: str = "whisper-1"
 
-    # ASR / Media 网关（与 app_local 一致）
-    asr_gateway_url: str = "https://home.ajcheng.com:8443/asr"
+    # ASR / Media 网关（与 app_local 一致；生产值通过 .env 注入）
+    asr_gateway_url: str = ""
     asr_gateway_api_key: str = ""
     asr_language: str = "Chinese"
-    media_gateway_url: str = "https://home.ajcheng.com:8443/media"
+    media_gateway_url: str = ""
     media_gateway_api_key: str = ""
 
     # 千问 VL 租户 API（recognition_provider=qwen 时使用）

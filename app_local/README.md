@@ -25,12 +25,12 @@
 
 | 配置项 | 示例 |
 |--------|------|
-| 图片网关 | `https://home.ajcheng.com:8443/media` |
+| 图片网关 | `https://home.example.com:8443/media` |
 | 视觉 API | `https://nfam-api.yst.com.cn/tenant/trans/call` |
 | API Key | `sk-...` |
 | Tenant ID | `ajcheng02` |
 | 模型 | `qwen-vl-plus` |
-| ASR 网关 | `https://home.ajcheng.com:8443/asr` |
+| ASR 网关 | `https://home.example.com:8443/asr` |
 
 ## 运行
 

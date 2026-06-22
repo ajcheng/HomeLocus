@@ -41,7 +41,7 @@ YOLO_MODEL=yolo11
 若经 Nginx 反代（仅用于外网调试，Celery 建议直连 WG IP）：
 
 ```env
-YOLO_API_URL=https://home.ajcheng.com:8443/yolo-api
+YOLO_API_URL=https://home.example.com:8443/yolo-api
 ```
 
 ## 响应示例
