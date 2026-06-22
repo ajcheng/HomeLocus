@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app/app_state.dart';
 import '../services/api_client.dart';
@@ -12,6 +13,7 @@ import 'photo_upload_screen.dart';
 import 'family_screen.dart';
 import 'settings_screen.dart';
 import 'user_management_screen.dart';
+import 'login_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -108,6 +110,34 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.settings),
             tooltip: '设置',
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: '退出登录',
+            onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('退出登录'),
+                  content: const Text('确定要退出登录吗？'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+                    FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('退出')),
+                  ],
+                ),
+              );
+              if (confirm != true) return;
+              ApiClient.authToken = null;
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.remove('auth_token');
+              if (context.mounted) {
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                  (_) => false,
+                );
+              }
+            },
           ),
         ],
       ),

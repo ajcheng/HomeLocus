@@ -12,8 +12,8 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _serverCtrl = TextEditingController(text: ApiClient.baseUrl);
-  final _userCtrl = TextEditingController(text: 'admin');
-  final _passCtrl = TextEditingController(text: 'HomeLocus@2026');
+  final _userCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
   final _apiKeyCtrl = TextEditingController();
   bool _loading = false;
   String? _error;
